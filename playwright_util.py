@@ -2,18 +2,14 @@
 Playwright工具类，提供浏览器自动化相关的功能
 """
 import json
-import logging
 import random
 import time
 from pathlib import Path
 from enum import Enum
-from typing import Optional, List, Dict, Any
+from typing import Optional
 from playwright.sync_api import Playwright, Browser, BrowserContext, Page, Locator
-from logger import log as logger
+from logger import log
 
-# 配置日志
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# logger = logging.getLogger(__name__)
 
 class DeviceType(Enum):
     """设备类型枚举"""
@@ -74,13 +70,13 @@ class PlaywrightUtil:
         # cls._mobile_page = cls._mobile_context.new_page()
         # cls._mobile_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
 
-        logger.info("Playwright及浏览器实例初始化完成")
+        log.info("Playwright及浏览器实例初始化完成")
 
     @classmethod
     def set_default_device_type(cls, device_type: DeviceType):
         """设置默认设备类型"""
         cls._default_device_type = device_type
-        logger.info(f"已设置默认设备类型为: {device_type}")
+        log.info(f"已设置默认设备类型为: {device_type}")
 
     @classmethod
     def _get_page(cls, device_type: DeviceType = None) -> Page:
@@ -114,7 +110,7 @@ class PlaywrightUtil:
         if cls._playwright:
             cls._playwright.stop()
 
-        logger.info("Playwright及浏览器实例已关闭")
+        log.info("Playwright及浏览器实例已关闭")
 
     @classmethod
     def navigate(cls, url: str, device_type: DeviceType = None):
@@ -123,7 +119,7 @@ class PlaywrightUtil:
             device_type = cls._default_device_type
             
         cls._get_page(device_type).goto(url)
-        logger.info(f"已导航到URL: {url} (设备类型: {device_type})")
+        log.info(f"已导航到URL: {url} (设备类型: {device_type})")
 
     @classmethod
     def mobile_navigate(cls, url: str):
@@ -165,18 +161,18 @@ class PlaywrightUtil:
         """点击元素"""
         try:
             cls._get_page(device_type).locator(selector).click()
-            logger.info(f"已点击元素: {selector} (设备类型: {device_type or cls._default_device_type})")
+            log.info(f"已点击元素: {selector} (设备类型: {device_type or cls._default_device_type})")
         except Exception as e:
-            logger.error(f"点击元素失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"点击元素失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
 
     @classmethod
     def fill(cls, selector: str, text: str, device_type: DeviceType = None):
         """填写表单字段"""
         try:
             cls._get_page(device_type).locator(selector).fill(text)
-            logger.info(f"已在元素{selector}中输入文本 (设备类型: {device_type or cls._default_device_type})")
+            log.info(f"已在元素{selector}中输入文本 (设备类型: {device_type or cls._default_device_type})")
         except Exception as e:
-            logger.error(f"填写表单失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"填写表单失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
 
     @classmethod
     def type_human_like(cls, selector: str, text: str, min_delay: int = 50, max_delay: int = 150, device_type: DeviceType = None):
@@ -191,9 +187,9 @@ class PlaywrightUtil:
                 # 输入单个字符
                 locator.press_sequentially(char, delay=delay)
                 
-            logger.info(f"已模拟人类在元素{selector}中输入文本 (设备类型: {device_type or cls._default_device_type})")
+            log.info(f"已模拟人类在元素{selector}中输入文本 (设备类型: {device_type or cls._default_device_type})")
         except Exception as e:
-            logger.error(f"模拟人类输入失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"模拟人类输入失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
 
     @classmethod
     def get_text(cls, selector: str, device_type: DeviceType = None) -> str:
@@ -201,7 +197,7 @@ class PlaywrightUtil:
         try:
             return cls._get_page(device_type).locator(selector).text_content() or ""
         except Exception as e:
-            logger.error(f"获取元素文本失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"获取元素文本失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
             return ""
 
     @classmethod
@@ -210,7 +206,7 @@ class PlaywrightUtil:
         try:
             return cls._get_page(device_type).locator(selector).get_attribute(attribute_name) or ""
         except Exception as e:
-            logger.error(f"获取元素属性失败: {selector}[{attribute_name}] (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"获取元素属性失败: {selector}[{attribute_name}] (设备类型: {device_type or cls._default_device_type})", exc_info=True)
             return ""
 
     @classmethod
@@ -218,18 +214,18 @@ class PlaywrightUtil:
         """截取页面截图并保存"""
         try:
             cls._get_page(device_type).screenshot(path=path)
-            logger.info(f"已保存截图到: {path} (设备类型: {device_type or cls._default_device_type})")
+            log.info(f"已保存截图到: {path} (设备类型: {device_type or cls._default_device_type})")
         except Exception as e:
-            logger.error(f"截图失败 (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"截图失败 (设备类型: {device_type or cls._default_device_type})", exc_info=True)
 
     @classmethod
     def screenshot_element(cls, selector: str, path: str, device_type: DeviceType = None):
         """截取特定元素的截图"""
         try:
             cls._get_page(device_type).locator(selector).screenshot(path=path)
-            logger.info(f"已保存元素截图到: {path} (设备类型: {device_type or cls._default_device_type})")
+            log.info(f"已保存元素截图到: {path} (设备类型: {device_type or cls._default_device_type})")
         except Exception as e:
-            logger.error(f"元素截图失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"元素截图失败: {selector} (设备类型: {device_type or cls._default_device_type})", exc_info=True)
 
     @classmethod
     def save_cookies(cls, path: str, device_type: DeviceType = None):
@@ -238,9 +234,9 @@ class PlaywrightUtil:
             cookies = cls._get_context(device_type).cookies()
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(cookies, f, ensure_ascii=False, indent=4)
-            logger.info(f"Cookie已保存到文件: {path} (设备类型: {device_type or cls._default_device_type})")
+            log.info(f"Cookie已保存到文件: {path} (设备类型: {device_type or cls._default_device_type})")
         except Exception as e:
-            logger.error(f"保存Cookie失败 (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"保存Cookie失败 (设备类型: {device_type or cls._default_device_type})", exc_info=True)
 
     @classmethod
     def load_cookies(cls, path: str, device_type: DeviceType = None):
@@ -249,9 +245,9 @@ class PlaywrightUtil:
             with open(path, 'r', encoding='utf-8') as f:
                 cookies = json.load(f)
             cls._get_context(device_type).add_cookies(cookies)
-            logger.info(f"已从文件加载Cookie: {path} (设备类型: {device_type or cls._default_device_type})")
+            log.info(f"已从文件加载Cookie: {path} (设备类型: {device_type or cls._default_device_type})")
         except Exception as e:
-            logger.error(f"加载Cookie失败 (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"加载Cookie失败 (设备类型: {device_type or cls._default_device_type})", exc_info=True)
 
     @classmethod
     def evaluate(cls, script: str, device_type: DeviceType = None):
@@ -259,7 +255,7 @@ class PlaywrightUtil:
         try:
             cls._get_page(device_type).evaluate(script)
         except Exception as e:
-            logger.error(f"执行JavaScript失败 (设备类型: {device_type or cls._default_device_type})", exc_info=True)
+            log.error(f"执行JavaScript失败 (设备类型: {device_type or cls._default_device_type})", exc_info=True)
 
     @classmethod
     def wait_for_page_load(cls, device_type: DeviceType = None):
@@ -351,11 +347,11 @@ class PlaywrightUtil:
                 with open(stealth_js_path, 'r', encoding='utf-8') as f:
                     stealth_js = f.read()
                 page.add_init_script(stealth_js)
-                logger.info("已加载stealth.min.js文件")
+                log.info("已加载stealth.min.js文件")
         except Exception as e:
-            logger.info("未找到stealth.min.js文件，使用内置反检测脚本")
+            log.info("未找到stealth.min.js文件，使用内置反检测脚本")
             
-        logger.info(f"已启用增强Stealth模式 (设备类型: {device_type or cls._default_device_type})")
+        log.info(f"已启用增强Stealth模式 (设备类型: {device_type or cls._default_device_type})")
 
     @classmethod
     def set_default_headers(cls, device_type: DeviceType = None):
@@ -374,7 +370,7 @@ class PlaywrightUtil:
         }
         
         context.set_extra_http_headers(headers)
-        logger.info(f"已设置默认请求头 (设备类型: {device_type or cls._default_device_type})")
+        log.info(f"已设置默认请求头 (设备类型: {device_type or cls._default_device_type})")
 
     @classmethod
     def get_page_object(cls, device_type: DeviceType = None) -> Page:
@@ -402,7 +398,7 @@ class PlaywrightUtil:
 
         cookies = [cookie]
         cls._get_context(device_type).add_cookies(cookies)
-        logger.info(f"已设置Cookie: {name} (设备类型: {device_type or cls._default_device_type})")
+        log.info(f"已设置Cookie: {name} (设备类型: {device_type or cls._default_device_type})")
 
     @classmethod
     def is_cookie_valid(cls, cookie_path: str) -> bool:
@@ -418,8 +414,8 @@ class PlaywrightUtil:
             if locator.count() > 0:
                 return locator
             else:
-                logger.error(message)
+                log.error(message)
                 return None
         except Exception as e:
-            logger.error(f"{message}: {e}")
+            log.error(f"{message}: {e}")
             return None

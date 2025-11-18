@@ -1,5 +1,4 @@
 import json
-import logging
 import time
 import urllib.parse
 from datetime import datetime
@@ -13,7 +12,7 @@ from boss_config import BossConfig, load_config_from_yaml
 from playwright_util import PlaywrightUtil, DeviceType
 from locators import Locators
 from job import Job
-from logger import log as logger
+from logger import log
 from resume_submission import ResumeSubmission
 
 class Boss:
@@ -22,8 +21,8 @@ class Boss:
     # 常量定义
     HOME_URL = "https://www.zhipin.com"
     BASE_URL = "https://www.zhipin.com/web/geek/job?"
-    DATA_PATH = "boss/data.json"
-    COOKIE_PATH = "boss/cookie.json"
+    DATA_PATH = "data/data.json"
+    COOKIE_PATH = "data/cookie.json"
 
     # 类变量
     black_companies: Set[str] = set()
@@ -37,7 +36,7 @@ class Boss:
     @classmethod
     def login(cls):
         """登录Boss直聘"""
-        logger.info("打开Boss直聘网站中...")
+        log.info("打开Boss直聘网站中...")
 
         page = PlaywrightUtil.get_page_object()
         page.goto(cls.HOME_URL)
@@ -55,7 +54,7 @@ class Boss:
             PlaywrightUtil.init_stealth()
 
         if cls.is_login_required():
-            logger.error("cookie失效，尝试扫码登录...")
+            log.error("cookie失效，尝试扫码登录...")
             cls.scan_login()
 
     @classmethod
@@ -75,7 +74,7 @@ class Boss:
                     # 等待用户输入回车
                     input("请完成滑块验证后按回车键继续...")
                 except Exception as e:
-                    logger.error(f"等待滑块验证输入异常: {e}")
+                    log.error(f"等待滑块验证输入异常: {e}")
 
                 # 等待1秒让页面有时间跳转
                 time.sleep(1)
@@ -100,12 +99,12 @@ class Boss:
         try:
             login_btn_locator = page.locator(Locators.LOGIN_BTN)
             if login_btn_locator.count() > 0 and login_btn_locator.text_content() != "登录":
-                logger.info("已经登录，直接开始投递...")
+                log.info("已经登录，直接开始投递...")
                 return
         except Exception:
             pass
 
-        logger.info("等待登录...")
+        log.info("等待登录...")
 
         # 2. 定位二维码登录的切换按钮
         try:
@@ -123,7 +122,7 @@ class Boss:
                 # 判断是否超时
                 elapsed = time.time() - start_time
                 if elapsed >= timeout:
-                    logger.error("超过10分钟未完成登录，程序退出...")
+                    log.error("超过10分钟未完成登录，程序退出...")
                     exit(1)
 
                 try:
@@ -131,7 +130,7 @@ class Boss:
                     job_list = page.locator("div.job-list-container")
                     if job_list.is_visible():
                         login_success = True
-                        logger.info("用户已登录！")
+                        log.info("用户已登录！")
                         # 登录成功，保存Cookie
                         PlaywrightUtil.save_cookies(cls.COOKIE_PATH)
                         break
@@ -140,18 +139,18 @@ class Boss:
                     current_url = page.url
                     if "www.zhipin.com" in current_url and "login" not in current_url:
                         login_success = True
-                        logger.info("检测到已跳转到主页，登录成功！")
+                        log.info("检测到已跳转到主页，登录成功！")
                         PlaywrightUtil.save_cookies(cls.COOKIE_PATH)
                         break
 
                 except Exception as e:
-                    logger.error(f"检测元素时异常: {e}")
+                    log.error(f"检测元素时异常: {e}")
 
                 # 每2秒检查一次
                 time.sleep(2)
 
         except Exception as e:
-            logger.error("未找到二维码登录按钮，登录失败", exc_info=True)
+            log.error("未找到二维码登录按钮，登录失败", exc_info=True)
 
     @classmethod
     def is_login_required(cls) -> bool:
@@ -176,9 +175,9 @@ class Boss:
                     return True
 
             except Exception as ex:
-                logger.info("没有出现403访问异常")
+                log.info("没有出现403访问异常")
 
-            logger.info("cookie有效，已登录...")
+            log.info("cookie有效，已登录...")
             return False
 
         return False
@@ -227,11 +226,11 @@ class Boss:
         """安全的登录流程，包含重试机制"""
         for attempt in range(max_retries):
             try:
-                logger.info(f"登录尝试 {attempt + 1}/{max_retries}")
+                log.info(f"登录尝试 {attempt + 1}/{max_retries}")
 
                 # 检查当前是否已登录
                 if cls.check_login_status():
-                    logger.info("当前已处于登录状态")
+                    log.info("当前已处于登录状态")
                     return True
 
                 # 执行登录流程
@@ -239,21 +238,21 @@ class Boss:
 
                 # 验证登录是否成功
                 if cls.check_login_status():
-                    logger.info("登录成功！")
+                    log.info("登录成功！")
                     return True
                 else:
-                    logger.warning(f"登录验证失败，尝试 {attempt + 1}/{max_retries}")
+                    log.warning(f"登录验证失败，尝试 {attempt + 1}/{max_retries}")
 
             except Exception as e:
-                logger.error(f"登录过程中出现异常: {e}")
+                log.error(f"登录过程中出现异常: {e}")
 
             # 如果不是最后一次尝试，等待后重试
             if attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 10  # 递增等待时间
-                logger.info(f"{wait_time}秒后重试登录...")
+                log.info(f"{wait_time}秒后重试登录...")
                 time.sleep(wait_time)
 
-        logger.error(f"经过{max_retries}次尝试后登录失败")
+        log.error(f"经过{max_retries}次尝试后登录失败")
         return False
     ######login end
 
@@ -272,7 +271,7 @@ class Boss:
                 }
                 with open(data_file, 'w', encoding='utf-8') as f:
                     json.dump(initial_data, f, ensure_ascii=False, indent=2)
-                logger.info(f"创建数据文件: {cls.DATA_PATH}")
+                log.info(f"创建数据文件: {cls.DATA_PATH}")
 
             # 检查cookie文件是否存在
             cookie_file = Path(cls.COOKIE_PATH)
@@ -280,10 +279,10 @@ class Boss:
                 cookie_file.parent.mkdir(parents=True, exist_ok=True)
                 with open(cookie_file, 'w', encoding='utf-8') as f:
                     json.dump([], f)
-                logger.info(f"创建cookie文件: {cls.COOKIE_PATH}")
+                log.info(f"创建cookie文件: {cls.COOKIE_PATH}")
 
         except Exception as e:
-            logger.error(f"创建文件时发生异常: {e}")
+            log.error(f"创建文件时发生异常: {e}")
 
     @classmethod
     def main(cls):
@@ -292,7 +291,7 @@ class Boss:
         cls.load_data(cls.DATA_PATH)
 
         # 初始化配置
-        cls.config = load_config_from_yaml("boss/config.yaml")
+        cls.config = load_config_from_yaml("data/config.yaml")
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init()
@@ -307,9 +306,9 @@ class Boss:
 
         # 输出结果
         if cls.result_list:
-            logger.info("新发起聊天公司如下:\n%s", "\n".join(str(job) for job in cls.result_list))
+            log.info("新发起聊天公司如下:\n%s", "\n".join(str(job) for job in cls.result_list))
         else:
-            logger.info("未发起新的聊天...")
+            log.info("未发起新的聊天...")
 
         if not cls.config.debugger:
             cls.print_result()
@@ -319,7 +318,7 @@ class Boss:
         """打印结果并清理资源"""
         duration = datetime.now() - cls.start_date
         message = f"\nBoss投递完成，共发起{len(cls.result_list)}个聊天，用时{cls.format_duration(duration)}"
-        logger.info(message)
+        log.info(message)
 
         # 发送消息（如果需要）
         cls.send_message_by_time(message)
@@ -365,7 +364,7 @@ class Boss:
             encoded_keyword = urllib.parse.quote(keyword)
 
             url = search_url + "&query=" + encoded_keyword
-            logger.info("投递地址: %s", search_url + "&query=" + keyword)
+            log.info("投递地址: %s", search_url + "&query=" + keyword)
 
             page = PlaywrightUtil.get_page_object()
             page.goto(url)
@@ -387,7 +386,7 @@ class Boss:
                     break
                 last_count = current_count
 
-            logger.info("【%s】岗位已全部加载，总数:%d", keyword, last_count)
+            log.info("【%s】岗位已全部加载，总数:%d", keyword, last_count)
 
             # 2. 回到页面顶部
             page.evaluate("window.scrollTo(0, 0);")
@@ -414,7 +413,7 @@ class Boss:
 
                 job_salary_raw = cls.safe_text(detail_box, "span.job-salary")
                 job_salary = cls.decode_salary(job_salary_raw)
-                logger.info("jobSalary: %s", job_salary)
+                log.info("jobSalary: %s", job_salary)
 
                 tags = cls.safe_all_text(detail_box, "ul[class*='tag-list'] > li")
                 job_desc = cls.safe_text(detail_box, "p.desc")
@@ -448,7 +447,7 @@ class Boss:
                 ResumeSubmission.resume_submission(page, keyword, job, cls.config, cls.result_list)
                 post_count += 1
 
-            logger.info("【%s】岗位已投递完毕！已投递岗位数量:%d", keyword, post_count)
+            log.info("【%s】岗位已投递完毕！已投递岗位数量:%d", keyword, post_count)
 
     @classmethod
     def decode_salary(cls, text: str) -> str:
@@ -525,7 +524,7 @@ class Boss:
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error("保存【%s】数据失败！%s", path, e)
+            log.error("保存【%s】数据失败！%s", path, e)
 
     @classmethod
     def update_list_data(cls):
@@ -566,9 +565,9 @@ class Boss:
                         except Exception:
                             retry_count += 1
                             if retry_count >= 2:
-                                logger.info("尝试获取元素文本2次失败，放弃本次获取")
+                                log.info("尝试获取元素文本2次失败，放弃本次获取")
                                 break
-                            logger.info("页面元素已变更，正在重试第%d次获取元素文本...", retry_count)
+                            log.info("页面元素已变更，正在重试第%d次获取元素文本...", retry_count)
                             PlaywrightUtil.sleep(1)
 
                     if company_name and message:
@@ -576,7 +575,7 @@ class Boss:
                         nomatch = any(keyword in message for keyword in ["不是", "不生"])
 
                         if match and not nomatch:
-                            logger.info("黑名单公司：【%s】，信息：【%s】", company_name, message)
+                            log.info("黑名单公司：【%s】，信息：【%s】", company_name, message)
                             if any(black_company in company_name for black_company in cls.black_companies):
                                 continue
 
@@ -586,7 +585,7 @@ class Boss:
                                 cls.black_companies.add(company_name)
 
                 except Exception as e:
-                    logger.error("寻找黑名单公司异常...%s", e)
+                    log.error("寻找黑名单公司异常...%s", e)
 
             try:
                 scroll_element = page.locator(Locators.SCROLL_LOAD_MORE)
@@ -595,10 +594,10 @@ class Boss:
                 else:
                     page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             except Exception as e:
-                logger.error("滚动元素出错%s", e)
+                log.error("滚动元素出错%s", e)
                 break
 
-        logger.info("黑名单公司数量：%d", len(cls.black_companies))
+        log.info("黑名单公司数量：%d", len(cls.black_companies))
 
     @classmethod
     def load_data(cls, path: str):
@@ -608,7 +607,7 @@ class Boss:
                 data = json.load(f)
             cls.parse_json(data)
         except Exception as e:
-            logger.error("读取【%s】数据失败！%s", path, e)
+            log.error("读取【%s】数据失败！%s", path, e)
 
     @classmethod
     def parse_json(cls, data: Dict[str, Any]):
@@ -620,5 +619,5 @@ class Boss:
     # 由于代码量很大，这里只展示了主要方法
     # 其他方法如 resume_submission, login, wait_for_slider_verify 等需要根据之前转换的代码进行整合
 
-if __name__ == "__main__":
-    Boss.main()
+# if __name__ == "__main__":
+#     Boss.main()

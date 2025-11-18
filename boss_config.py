@@ -1,12 +1,11 @@
 import json
-import logging
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from boss_enum import BossEnum
 
-from logger import log as logger
+from logger import log
 
 
 @dataclass
@@ -103,12 +102,12 @@ class BossConfig:
         if json_path:
             json_file = Path(json_path)
         else:
-            json_file = Path("boss/city-industry-code.json")
+            json_file = Path("data/city-industry-code.json")
         if not json_file.exists():
             # 尝试其他可能的位置
             json_file = Path("src/main/java/boss/city-industry-code.json")
             if not json_file.exists():
-                logger.error(f"城市代码JSON文件不存在: {json_file.absolute()}")
+                log.error(f"城市代码JSON文件不存在: {json_file.absolute()}")
                 return
         
         try:
@@ -123,10 +122,10 @@ class BossConfig:
                 if name and code:
                     self._city_code_map[name] = code
                     
-            logger.info(f"成功加载 {len(self._city_code_map)} 个城市代码")
+            log.info(f"成功加载 {len(self._city_code_map)} 个城市代码")
             
         except Exception as e:
-            logger.error(f"加载城市代码失败: {e}")
+            log.error(f"加载城市代码失败: {e}")
     
     def _get_city_code_from_json(self, city_name: str) -> Optional[str]:
         """根据城市名称获取城市代码"""
@@ -158,10 +157,10 @@ class BossConfig:
                 continue
             
             # 如果都找不到，返回"不限"的代码
-            logger.warning(f"未找到城市【{city}】的代码，使用默认值 0")
+            log.warning(f"未找到城市【{city}】的代码，使用默认值 0")
             converted_city_codes.append("0")
         
-        logger.info(f"转换后的城市代码: {self.city_code} -> {converted_city_codes}")
+        log.info(f"转换后的城市代码: {self.city_code} -> {converted_city_codes}")
         self.city_code = converted_city_codes
     
     def _convert_job_type(self):
@@ -171,7 +170,7 @@ class BossConfig:
                 job_type_enum = BossEnum.JobType.for_value(self.job_type)
                 self.job_type = job_type_enum.code
             except Exception as e:
-                logger.warning(f"转换工作类型失败: {e}, 使用默认值 0")
+                log.warning(f"转换工作类型失败: {e}, 使用默认值 0")
                 self.job_type = "0"
     
     def _convert_salary(self):
@@ -181,7 +180,7 @@ class BossConfig:
                 salary_enum = BossEnum.Salary.for_value(self.salary)
                 self.salary = salary_enum.code
             except Exception as e:
-                logger.warning(f"转换薪资范围失败: {e}, 使用默认值")
+                log.warning(f"转换薪资范围失败: {e}, 使用默认值")
                 self.salary = "0"
     
     def _convert_experience(self):
@@ -192,7 +191,7 @@ class BossConfig:
                 exp_enum = BossEnum.Experience.for_value(value)
                 converted_experience.append(exp_enum.code)
             except Exception as e:
-                logger.warning(f"转换工作经验失败: {value}, 跳过")
+                log.warning(f"转换工作经验失败: {value}, 跳过")
                 continue
         self.experience = converted_experience
     
@@ -204,7 +203,7 @@ class BossConfig:
                 degree_enum = BossEnum.Degree.for_value(value)
                 converted_degree.append(degree_enum.code)
             except Exception as e:
-                logger.warning(f"转换学历要求失败: {value}, 跳过")
+                log.warning(f"转换学历要求失败: {value}, 跳过")
                 continue
         self.degree = converted_degree
     
@@ -216,7 +215,7 @@ class BossConfig:
                 scale_enum = BossEnum.Scale.for_value(value)
                 converted_scale.append(scale_enum.code)
             except Exception as e:
-                logger.warning(f"转换公司规模失败: {value}, 跳过")
+                log.warning(f"转换公司规模失败: {value}, 跳过")
                 continue
         self.scale = converted_scale
     
@@ -228,7 +227,7 @@ class BossConfig:
                 stage_enum = BossEnum.Financing.for_value(value)
                 converted_stage.append(stage_enum.code)
             except Exception as e:
-                logger.warning(f"转换融资阶段失败: {value}, 跳过")
+                log.warning(f"转换融资阶段失败: {value}, 跳过")
                 continue
         self.stage = converted_stage
     
@@ -240,7 +239,7 @@ class BossConfig:
                 industry_enum = BossEnum.Industry.for_value(value)
                 converted_industry.append(industry_enum.code)
             except Exception as e:
-                logger.warning(f"转换行业失败: {value}, 跳过")
+                log.warning(f"转换行业失败: {value}, 跳过")
                 continue
         self.industry = converted_industry
     
@@ -259,7 +258,7 @@ class BossConfig:
         self._convert_stage()
         self._convert_industry()
         
-        logger.info("配置初始化完成")
+        log.info("配置初始化完成")
         return self
     
     def to_dict(self) -> Dict[str, Any]:
@@ -301,13 +300,13 @@ def load_config_from_yaml(file_path: str = "boss/config.yaml") -> BossConfig:
     try:
         import yaml
     except ImportError:
-        logger.error("缺少yaml模块，请安装 pyyaml 包以支持YAML配置文件")
+        log.error("缺少yaml模块，请安装 pyyaml 包以支持YAML配置文件")
         raise
     
     try:
         config_file = Path(file_path)
         if not config_file.exists():
-            logger.error(f"配置文件不存在: {file_path}")
+            log.error(f"配置文件不存在: {file_path}")
             # TODO 创建默认配置
             default_config = BossConfig()
             return default_config.init()
@@ -315,12 +314,12 @@ def load_config_from_yaml(file_path: str = "boss/config.yaml") -> BossConfig:
         with open(config_file, 'r', encoding='utf-8') as f:
             config_dict = yaml.safe_load(f)
         
-        logger.info(f"成功加载YAML配置文件: {config_dict['boss']}")
+        log.info(f"成功加载YAML配置文件: {config_dict['boss']}")
         config = BossConfig.from_dict(config_dict["boss"])
         return config.init()
         
     except Exception as e:
-        logger.error(f"加载配置文件失败: {e}")
+        log.error(f"加载配置文件失败: {e}")
         # 返回默认配置
         default_config = BossConfig()
         return default_config.init()
@@ -334,7 +333,7 @@ def load_config_from_yaml(file_path: str = "boss/config.yaml") -> BossConfig:
 #     try:
 #         config_file = Path(file_path)
 #         if not config_file.exists():
-#             logger.error(f"配置文件不存在: {file_path}")
+#             log.error(f"配置文件不存在: {file_path}")
 #             # 创建默认配置
 #             default_config = BossConfig()
 #             return default_config.init()
@@ -346,7 +345,7 @@ def load_config_from_yaml(file_path: str = "boss/config.yaml") -> BossConfig:
 #         return config.init()
         
 #     except Exception as e:
-#         logger.error(f"加载配置文件失败: {e}")
+#         log.error(f"加载配置文件失败: {e}")
 #         # 返回默认配置
 #         default_config = BossConfig()
 #         return default_config.init()
@@ -380,13 +379,13 @@ if __name__ == "__main__":
     config = BossConfig.from_dict(sample_config)
     config.init()
     
-    logger.info("初始化后的配置:")
-    logger.info(f"城市代码: {config.city_code}")
-    logger.info(f"工作类型代码: {config.job_type}")
-    logger.info(f"薪资代码: {config.salary}")
-    logger.info(f"工作经验代码: {config.experience}")
-    logger.info(f"学历代码: {config.degree}")
-    logger.info(f"从dict加载的配置:{config.to_dict()}")
+    log.info("初始化后的配置:")
+    log.info(f"城市代码: {config.city_code}")
+    log.info(f"工作类型代码: {config.job_type}")
+    log.info(f"薪资代码: {config.salary}")
+    log.info(f"工作经验代码: {config.experience}")
+    log.info(f"学历代码: {config.degree}")
+    log.info(f"从dict加载的配置:{config.to_dict()}")
 
     config2 = load_config_from_yaml("boss/config.yaml")
-    logger.info("从YAML文件加载的配置: %s", config2)
+    log.info("从YAML文件加载的配置: %s", config2)

@@ -9,7 +9,7 @@ from boss_config import BossConfig
 from job import Job
 from ai_filter import AiFilter
 from playwright_util import PlaywrightUtil
-from logger import log as logger
+from logger import log
 
 
 class ResumeSubmission:
@@ -36,13 +36,13 @@ class ResumeSubmission:
             # 1. 查找"查看更多信息"按钮（必须存在且新开页）
             more_info_btn = page.locator("a.more-job-btn")
             if more_info_btn.count() == 0:
-                logger.warning("未找到'查看更多信息'按钮，跳过...")
+                log.warning("未找到'查看更多信息'按钮，跳过...")
                 return False
             
             # 强制用js新开tab
             href = more_info_btn.first.get_attribute("href")
             if not href or not href.startswith("/job_detail/"):
-                logger.warning("未获取到岗位详情链接，跳过...")
+                log.warning("未获取到岗位详情链接，跳过...")
                 return False
             
             detail_url = urljoin("https://www.zhipin.com", href)
@@ -64,7 +64,7 @@ class ResumeSubmission:
                 PlaywrightUtil.sleep(1)
             
             if not found_chat_btn:
-                logger.warning("未找到立即沟通按钮，跳过岗位: %s", job.job_name)
+                log.warning("未找到立即沟通按钮，跳过岗位: %s", job.job_name)
                 detail_page.close()
                 return False
             
@@ -81,7 +81,7 @@ class ResumeSubmission:
                 PlaywrightUtil.sleep(1)
             
             if not input_ready:
-                logger.warning("聊天输入框未出现，跳过: %s", job.job_name)
+                log.warning("聊天输入框未出现，跳过: %s", job.job_name)
                 detail_page.close()
                 return False
 
@@ -116,13 +116,13 @@ class ResumeSubmission:
                     # 查找图片简历文件
                     resume_path = cls.find_resume_image()
                     if resume_path:
-                        logger.info("找到图片简历")
+                        log.info("找到图片简历")
                         file_input = detail_page.locator("//div[@aria-label='发送图片']//input[@type='file']")
                         if file_input.count() > 0:
                             file_input.set_input_files(resume_path)
                             img_resume = True
                 except Exception as e:
-                    logger.error("发送图片简历失败: %s", e)
+                    log.error("发送图片简历失败: %s", e)
 
             # 8. 点击发送按钮
             send_btn = detail_page.locator("div.send-message, button[type='send'].btn-send, button.btn-send")
@@ -132,9 +132,9 @@ class ResumeSubmission:
                 PlaywrightUtil.sleep(1)
                 send_success = True
             else:
-                logger.warning("未找到发送按钮，自动跳过！岗位：%s", job.job_name)
+                log.warning("未找到发送按钮，自动跳过！岗位：%s", job.job_name)
 
-            logger.info("投递完成 | 岗位：%s | 招呼语：%s | 图片简历：%s", 
+            log.info("投递完成 | 岗位：%s | 招呼语：%s | 图片简历：%s", 
                        job.job_name, message, "已发送" if img_resume else "未发送")
 
             # 9. 关闭详情页，回到主页面
@@ -149,7 +149,7 @@ class ResumeSubmission:
                 return False
 
         except Exception as e:
-            logger.error("简历投递过程中出现异常: %s", e)
+            log.error("简历投递过程中出现异常: %s", e)
             # 确保在异常时关闭详情页
             try:
                 if 'detail_page' in locals():
@@ -186,7 +186,7 @@ class ResumeSubmission:
             #     return AiFilter(True, result)
             return None
         except Exception as e:
-            logger.error("AI检查职位失败: %s", e)
+            log.error("AI检查职位失败: %s", e)
             return None
 
     @classmethod
@@ -223,7 +223,7 @@ class ResumeSubmission:
             if path.exists():
                 return path
         
-        logger.warning("未找到简历图片文件")
+        log.warning("未找到简历图片文件")
         return None
 
     @classmethod
@@ -244,26 +244,26 @@ class ResumeSubmission:
         """
         for attempt in range(max_retries):
             try:
-                logger.info("尝试投递职位 '%s' (第%d次尝试)", job.job_name, attempt + 1)
+                log.info("尝试投递职位 '%s' (第%d次尝试)", job.job_name, attempt + 1)
                 
                 success = cls.resume_submission(page, keyword, job, config, result_list)
                 
                 if success:
-                    logger.info("成功投递职位 '%s'", job.job_name)
+                    log.info("成功投递职位 '%s'", job.job_name)
                     return True
                 else:
-                    logger.warning("第%d次投递职位 '%s' 失败", attempt + 1, job.job_name)
+                    log.warning("第%d次投递职位 '%s' 失败", attempt + 1, job.job_name)
                     
             except Exception as e:
-                logger.error("第%d次投递职位 '%s' 时出现异常: %s", attempt + 1, job.job_name, e)
+                log.error("第%d次投递职位 '%s' 时出现异常: %s", attempt + 1, job.job_name, e)
             
             # 如果不是最后一次尝试，等待后重试
             if attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 5  # 递增等待时间
-                logger.info("%d秒后重试投递...", wait_time)
+                log.info("%d秒后重试投递...", wait_time)
                 time.sleep(wait_time)
         
-        logger.error("经过%d次尝试后投递职位 '%s' 失败", max_retries, job.job_name)
+        log.error("经过%d次尝试后投递职位 '%s' 失败", max_retries, job.job_name)
         return False
 
 

@@ -10,8 +10,8 @@ import time
 import schedule
 from concurrent.futures import ThreadPoolExecutor
 from boss_config import BossConfig
+from logger import log
 
-logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
 
@@ -70,7 +70,7 @@ class JobUtils:
                 return clazz(**config_dict)
                 
         except Exception as e:
-            logger.error(f"加载配置文件失败: {e}")
+            log.error(f"加载配置文件失败: {e}")
             raise
     
     @staticmethod
@@ -102,7 +102,7 @@ class JobUtils:
             if platform_name == 'BOSS':
                 JobUtils.schedule_task_at_time(platform_name, 15, 0, platform_actions[platform_name])
         else:
-            logger.warning("未定义的平台任务：%s", platform_name)
+            log.warning("未定义的平台任务：%s", platform_name)
     
     @staticmethod
     def format_duration(start_date: datetime, end_date: datetime) -> str:
@@ -156,7 +156,7 @@ class JobUtils:
         delay_seconds = JobUtils.get_initial_delay(hour, minute)
         
         msg = f"【{platform}】距离下次任务投递还有：{JobUtils.format_duration_seconds(delay_seconds)}，执行时间：{hour:02d}:{minute:02d}"
-        logger.info(msg)
+        log.info(msg)
         
         # 发送消息（需要实现Bot类）
         # Bot.send_message(msg)
@@ -248,7 +248,7 @@ class JobUtils:
             thread = threading.Thread(target=scheduled_task, daemon=True)
             thread.start()
         
-        logger.info(msg)
+        log.info(msg)
         # Bot.send_message(msg)
     
     @staticmethod
@@ -299,7 +299,7 @@ class AdvancedScheduler:
         schedule.every().day.at(f"{hour:02d}:{minute:02d}").do(self._run_task, platform, task)
         
         msg = f"【{platform}】已安排每日任务，执行时间：{hour:02d}:{minute:02d}"
-        logger.info(msg)
+        log.info(msg)
         # Bot.send_message(msg)
     
     def schedule_interval_task(self, platform: str, task: Callable, hours: int = 24):
@@ -307,17 +307,17 @@ class AdvancedScheduler:
         schedule.every(hours).hours.do(self._run_task, platform, task)
         
         msg = f"【{platform}】已安排间隔任务，每{hours}小时执行一次"
-        logger.info(msg)
+        log.info(msg)
         # Bot.send_message(msg)
     
     def _run_task(self, platform: str, task: Callable):
         """运行任务"""
         try:
-            logger.info(f"开始执行【{platform}】任务")
+            log.info(f"开始执行【{platform}】任务")
             task()
-            logger.info(f"【{platform}】任务执行完成")
+            log.info(f"【{platform}】任务执行完成")
         except Exception as e:
-            logger.error(f"执行【{platform}】任务时出错: {e}")
+            log.error(f"执行【{platform}】任务时出错: {e}")
     
     def start(self):
         """启动调度器"""
@@ -328,7 +328,7 @@ class AdvancedScheduler:
         
         thread = threading.Thread(target=run_scheduler, daemon=True)
         thread.start()
-        logger.info("高级调度器已启动")
+        log.info("高级调度器已启动")
 
 
 # 使用示例
