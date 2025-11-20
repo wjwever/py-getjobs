@@ -8,6 +8,21 @@ from boss_enum import BossEnum
 from logger import log
 
 
+@dataclass 
+class AIConfig:
+    """
+    AI配置类
+    """
+    prompt_template: str = ""
+    model: str = "deepseek-chat"
+    api_key: str = ""
+    base_url: str = "https://api.deepseek.com"
+    resume_md: str = "data/resume.md"
+    def __str__(self) -> str:
+        """字符串表示"""
+        return f"AIConfig(model={self.model}, base_url={self.base_url})"
+
+
 @dataclass
 class BossConfig:
     """
@@ -69,7 +84,7 @@ class BossConfig:
     
     # 城市代码映射缓存
     _city_code_map: Dict[str, str] = field(default_factory=dict, init=False)
-    
+
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'BossConfig':
         """从字典创建配置对象"""
@@ -86,7 +101,7 @@ class BossConfig:
             degree=config_dict.get("degree", []),
             scale=config_dict.get("scale", []),
             stage=config_dict.get("stage", []),
-            enable_ai=config_dict.get("enableAi", False),
+            enable_ai=config_dict.get("enableAI", False),
             filter_dead_hr=config_dict.get("filterDeadHr", False),
             send_img_resume=config_dict.get("sendImgResume", False),
             expected_salary=config_dict.get("expectedSalary", []),
@@ -316,7 +331,14 @@ def load_config_from_yaml(file_path: str = "boss/config.yaml") -> BossConfig:
         
         log.info(f"成功加载YAML配置文件: {config_dict['boss']}")
         config = BossConfig.from_dict(config_dict["boss"])
-        return config.init()
+        ai_config = AIConfig(
+            prompt_template=config_dict["ai"].get("prompt", ""),
+            model=config_dict["ai"].get("model", "deepseek-chat"),
+            api_key=config_dict["ai"].get("api_key", ""),
+            base_url=config_dict["ai"].get("url", "https://api.deepseek.com"),
+            resume_md=config_dict["ai"].get("resume_md", "data/resume.md")
+        )
+        return config.init(), ai_config
         
     except Exception as e:
         log.error(f"加载配置文件失败: {e}")
@@ -387,5 +409,7 @@ if __name__ == "__main__":
     log.info(f"学历代码: {config.degree}")
     log.info(f"从dict加载的配置:{config.to_dict()}")
 
-    config2 = load_config_from_yaml("boss/config.yaml")
-    log.info("从YAML文件加载的配置: %s", config2)
+    boss_config, ai_config = load_config_from_yaml("data/config.yaml")
+    log.info("从YAML文件加载的配置: %s", boss_config)
+    log.info(f"enable_ai {boss_config.enable_ai}")
+    log.info("AI配置: %s", ai_config)

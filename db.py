@@ -1,3 +1,4 @@
+#目的是把岗位信息存入数据库, 目前没有用到
 import mysql.connector
 from mysql.connector import Error
 

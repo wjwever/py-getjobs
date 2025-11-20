@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 from playwright.sync_api import Page
 
-from boss_config import BossConfig
+from boss_config import BossConfig,AIConfig
 from job import Job
 from ai_filter import AiFilter
 from playwright_util import PlaywrightUtil
@@ -16,7 +16,7 @@ class ResumeSubmission:
     """Boss直聘简历投递类"""
     
     @classmethod
-    def resume_submission(cls, page: Page, keyword: str, job: Job, config: BossConfig, result_list: list) -> bool:
+    def resume_submission(cls, page: Page, keyword: str, job: Job, config: BossConfig, ai_config:AIConfig, result_list: list) -> bool:
         """
         简历投递方法
         
@@ -33,6 +33,19 @@ class ResumeSubmission:
         PlaywrightUtil.sleep(1)
 
         try:
+            # 0.AI 检查职位是否符合要求
+            ai_result = None
+            if config.enable_ai:
+                jd = job.job_info
+                if jd and jd.strip():
+                    ai_result = cls.check_job(keyword, job.job_name, jd, config, ai_config)
+
+            if ai_result and ai_result.result == False:
+                log.info("AI认为不合适")
+                return False
+            else:
+                log.info("AI认为匹配,开始投递")
+
             # 1. 查找"查看更多信息"按钮（必须存在且新开页）
             more_info_btn = page.locator("a.more-job-btn")
             if more_info_btn.count() == 0:
@@ -86,11 +99,12 @@ class ResumeSubmission:
                 return False
 
             # 5. AI智能生成打招呼语
-            ai_result = None
-            if config.enable_ai:
-                jd = job.job_info
-                if jd and jd.strip():
-                    ai_result = cls.check_job(keyword, job.job_name, jd, config)
+            # ai_result = None
+            # log.info(f"enable_ai { config.enable_ai}")
+            # if config.enable_ai:
+            #     jd = job.job_info
+            #     if jd and jd.strip():
+            #         ai_result = cls.check_job(keyword, job.job_name, jd, config)
             
             say_hi = config.say_hi.replace("[\r\n]", "")
             if ai_result and ai_result.result and cls.is_valid_string(ai_result.message):
@@ -159,7 +173,7 @@ class ResumeSubmission:
             return False
 
     @classmethod
-    def check_job(cls, keyword: str, job_name: str, jd: str, config: BossConfig) -> Optional[AiFilter]:
+    def check_job(cls, keyword: str, job_name: str, jd: str, config: BossConfig, ai_config:AIConfig) -> Optional[AiFilter]:
         """
         检查职位是否符合要求（AI过滤）
         
@@ -175,16 +189,15 @@ class ResumeSubmission:
         # 这里需要实现AI服务调用
         # 暂时返回None，需要根据实际情况实现
         try:
-            # 示例实现 - 需要根据实际情况调整
-            # from ai_service import AiService  # 假设有AI服务类
-            # ai_config = AiConfig.init()  # 假设有AI配置类
-            # request_message = f"{ai_config.introduce}, {keyword}, {job_name}, {jd}, {config.say_hi}"
-            # result = AiService.send_request(request_message)
-            # if "false" in result:
-            #     return AiFilter(False)
-            # else:
-            #     return AiFilter(True, result)
-            return None
+            from ai_service import AIService
+            import json
+            bot = AIService(ai_config)
+            res = bot.chat(jd)
+            if res:
+                obj = json.loads(res)
+                return AiFilter(obj["match"], obj["hi"])
+            else:
+                return None
         except Exception as e:
             log.error("AI检查职位失败: %s", e)
             return None

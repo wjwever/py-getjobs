@@ -34,7 +34,7 @@ class PlaywrightUtil:
     DEFAULT_WAIT_TIME = 10000
 
     @classmethod
-    def init(cls):
+    def init(cls, device_type:DeviceType):
         """初始化Playwright及浏览器实例"""
         from playwright.sync_api import sync_playwright
         
@@ -62,13 +62,16 @@ class PlaywrightUtil:
             user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
         )
 
-        # 创建桌面页面
-        cls._desktop_page = cls._desktop_context.new_page()
-        cls._desktop_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
 
-        # 创建移动设备页面
-        # cls._mobile_page = cls._mobile_context.new_page()
-        # cls._mobile_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
+        cls.set_default_device_type(device_type)
+        # 创建桌面页面
+        if cls._default_device_type == DeviceType.DESKTOP:
+            cls._desktop_page = cls._desktop_context.new_page()
+            cls._desktop_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
+        else:
+            # 创建移动设备页面
+            cls._mobile_page = cls._mobile_context.new_page()
+            cls._mobile_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
 
         log.info("Playwright及浏览器实例初始化完成")
 

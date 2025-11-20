@@ -8,7 +8,7 @@ from typing import List, Set, Dict, Optional, Any
 from playwright.sync_api import Page, Locator
 
 from boss_enum import BossEnum
-from boss_config import BossConfig, load_config_from_yaml
+from boss_config import BossConfig, load_config_from_yaml, AIConfig
 from playwright_util import PlaywrightUtil, DeviceType
 from locators import Locators
 from job import Job
@@ -21,7 +21,7 @@ class Boss:
     # 常量定义
     HOME_URL = "https://www.zhipin.com"
     BASE_URL = "https://www.zhipin.com/web/geek/job?"
-    DATA_PATH = "data/data.json"
+    DATA_PATH = "data/blacklist.json"
     COOKIE_PATH = "data/cookie.json"
 
     # 类变量
@@ -31,6 +31,7 @@ class Boss:
     result_list: List[Job] = []
     start_date: Optional[datetime] = None
     config: BossConfig
+    ai_config: AIConfig
 
     ##### login start
     @classmethod
@@ -291,10 +292,10 @@ class Boss:
         cls.load_data(cls.DATA_PATH)
 
         # 初始化配置
-        cls.config = load_config_from_yaml("data/config.yaml")
+        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
 
         # 使用Playwright获取岗位
-        PlaywrightUtil.init()
+        PlaywrightUtil.init(DeviceType.DESKTOP)
         cls.start_date = datetime.now()
 
         # 登录
@@ -413,23 +414,27 @@ class Boss:
 
                 job_salary_raw = cls.safe_text(detail_box, "span.job-salary")
                 job_salary = cls.decode_salary(job_salary_raw)
-                log.info("jobSalary: %s", job_salary)
 
                 tags = cls.safe_all_text(detail_box, "ul[class*='tag-list'] > li")
                 job_desc = cls.safe_text(detail_box, "p.desc")
+                #log.info("job_desc:%s", job_desc)
 
                 boss_name_raw = cls.safe_text(detail_box, "h2[class*='name']")
                 boss_name, boss_active = cls.split_boss_name(boss_name_raw)
 
-                if any(dead_status in boss_active for dead_status in cls.config.dead_status):
-                    continue
-
                 boss_title_raw = cls.safe_text(detail_box, "div[class*='boss-info-attr']")
                 boss_company, boss_job_title = cls.split_boss_title(boss_title_raw)
+                log.info("%s %s %s %s", boss_company, boss_name, boss_job_title, job_salary)
+
+                if any(dead_status in boss_active for dead_status in cls.config.dead_status):
+                    log.info("boss is not active")
+                    continue
 
                 if any(black_company in boss_company for black_company in cls.black_companies):
+                    log.info("black company: %s", boss_company)
                     continue
                 if any(black_recruiter in boss_job_title for black_recruiter in cls.black_recruiters):
+                    log.info("black recruiter:%s", boss_job_title)
                     continue
 
                 # 创建Job对象
@@ -444,8 +449,8 @@ class Boss:
 
                 # 投递简历
                 # cls.resume_submission(page, keyword, job)
-                ResumeSubmission.resume_submission(page, keyword, job, cls.config, cls.result_list)
-                post_count += 1
+                if ResumeSubmission.resume_submission(page, keyword, job, cls.config, cls.ai_config, cls.result_list):
+                    post_count += 1
 
             log.info("【%s】岗位已投递完毕！已投递岗位数量:%d", keyword, post_count)
 
