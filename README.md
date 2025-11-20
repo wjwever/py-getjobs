@@ -16,6 +16,7 @@
 
 ```bash
 pip install -r requirements.txt  -i https://mirrors.aliyun.com/pypi/simple/
+playwright install chromium
 python3 main.py
 ```
 
