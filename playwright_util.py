@@ -121,8 +121,14 @@ class PlaywrightUtil:
         if device_type is None:
             device_type = cls._default_device_type
             
-        cls._get_page(device_type).goto(url)
-        log.info(f"已导航到URL: {url} (设备类型: {device_type})")
+        for _ in range(10):
+            try:
+                cls._get_page(device_type).goto(url)
+                log.info(f"已导航到URL: {url} (设备类型: {device_type})")
+                break
+            except:
+                log.info(f"重试导航到URL: {url} (设备类型: {device_type})")
+                pass
 
     @classmethod
     def mobile_navigate(cls, url: str):

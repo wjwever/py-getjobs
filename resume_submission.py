@@ -16,7 +16,7 @@ class ResumeSubmission:
     """Boss直聘简历投递类"""
     
     @classmethod
-    def resume_submission(cls, page: Page, keyword: str, job: Job, config: BossConfig, ai_config:AIConfig, result_list: list) -> bool:
+    def resume_submission(cls, page: Page, keyword: str, job: Job, config: BossConfig, ai_config:AIConfig, result_list: list) -> str:
         """
         简历投递方法
         
@@ -31,6 +31,7 @@ class ResumeSubmission:
             bool: 投递是否成功
         """
         PlaywrightUtil.sleep(1)
+        detail_page = page
 
         try:
             # 0.AI 检查职位是否符合要求
@@ -42,27 +43,27 @@ class ResumeSubmission:
 
             if ai_result and ai_result.result == False:
                 log.info("AI认为不合适")
-                return False
+                return "ai_filtered"
             else:
                 log.info("AI认为匹配,开始投递")
 
-            # 1. 查找"查看更多信息"按钮（必须存在且新开页）
-            more_info_btn = page.locator("a.more-job-btn")
-            if more_info_btn.count() == 0:
-                log.warning("未找到'查看更多信息'按钮，跳过...")
-                return False
-            
-            # 强制用js新开tab
-            href = more_info_btn.first.get_attribute("href")
-            if not href or not href.startswith("/job_detail/"):
-                log.warning("未获取到岗位详情链接，跳过...")
-                return False
-            
-            detail_url = urljoin("https://www.zhipin.com", href)
-
-            # 2. 新开详情页
-            detail_page = page.context.new_page()
-            detail_page.goto(detail_url)
+            # # 1. 查找"查看更多信息"按钮（必须存在且新开页）
+            # more_info_btn = page.locator("a.more-job-btn")
+            # if more_info_btn.count() == 0:
+            #     log.warning("未找到'查看更多信息'按钮，跳过...")
+            #     return False
+            #
+            # # 强制用js新开tab
+            # href = more_info_btn.first.get_attribute("href")
+            # if not href or not href.startswith("/job_detail/"):
+            #     log.warning("未获取到岗位详情链接，跳过...")
+            #     return False
+            #
+            # detail_url = urljoin("https://www.zhipin.com", href)
+            #
+            # # 2. 新开详情页
+            # detail_page = page.context.new_page()
+            # detail_page.goto(detail_url)
             PlaywrightUtil.sleep(1)  # 页面加载
 
             # 3. 查找"立即沟通"按钮
@@ -78,8 +79,8 @@ class ResumeSubmission:
             
             if not found_chat_btn:
                 log.warning("未找到立即沟通按钮，跳过岗位: %s", job.job_name)
-                detail_page.close()
-                return False
+                # detail_page.close()
+                return "page_error"
             
             chat_btn.first.click()
             PlaywrightUtil.sleep(1)
@@ -95,8 +96,8 @@ class ResumeSubmission:
             
             if not input_ready:
                 log.warning("聊天输入框未出现，跳过: %s", job.job_name)
-                detail_page.close()
-                return False
+                # detail_page.close()
+                return "page_error"
 
             # 5. AI智能生成打招呼语
             # ai_result = None
@@ -152,25 +153,25 @@ class ResumeSubmission:
                        job.job_name, message, "已发送" if img_resume else "未发送")
 
             # 9. 关闭详情页，回到主页面
-            detail_page.close()
+            # detail_page.close()
             PlaywrightUtil.sleep(1)
 
             # 10. 成功投递加入结果
             if send_success:
                 result_list.append(job)
-                return True
+                return "post_ok"
             else:
-                return False
+                return "post_failure"
 
         except Exception as e:
             log.error("简历投递过程中出现异常: %s", e)
             # 确保在异常时关闭详情页
-            try:
-                if 'detail_page' in locals():
-                    detail_page.close()
-            except:
-                pass
-            return False
+            # try:
+            #     if 'detail_page' in locals():
+            #         detail_page.close()
+            # except:
+            #     pass
+            return "post_eror"
 
     @classmethod
     def check_job(cls, keyword: str, job_name: str, jd: str, config: BossConfig, ai_config:AIConfig) -> Optional[AiFilter]:

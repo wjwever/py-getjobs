@@ -1,1 +1,1 @@
-/home/ww/Desktop/resume/wang_cpp_1119.md
+wang_cpp_1119.md

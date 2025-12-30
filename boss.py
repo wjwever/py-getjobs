@@ -3,17 +3,19 @@ import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
-from typing import List, Set, Dict, Optional, Any
+from typing import List, Set, Dict, Optional, Any 
 
 from playwright.sync_api import Page, Locator
 
 from boss_enum import BossEnum
 from boss_config import BossConfig, load_config_from_yaml, AIConfig
+from db.db import DatabaseManager
+import job
 from playwright_util import PlaywrightUtil, DeviceType
 from locators import Locators
 from job import Job
 from logger import log
-from resume_submission import ResumeSubmission
+from resume_submission import ResumeSubmission, safe_resume_submission
 
 class Boss:
     """Boss直聘自动化主类"""
@@ -286,6 +288,98 @@ class Boss:
             log.error(f"创建文件时发生异常: {e}")
 
     @classmethod
+    def get_all_jobs(cls):
+        """主方法"""
+        cls.initialize_files()
+        cls.load_data(cls.DATA_PATH)
+
+        # 初始化配置
+        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+
+        # 使用Playwright获取岗位
+        PlaywrightUtil.init(DeviceType.DESKTOP)
+        cls.start_date = datetime.now()
+
+        # 登录
+        cls.login()
+
+        # 按城市投递
+        for city_code in cls.config.city_code:
+            cls.get_all_jobs_by_city(city_code)
+
+        # 输出结果
+        # if cls.result_list:
+        #     log.info("新发起聊天公司如下:\n%s", "\n".join(str(job) for job in cls.result_list))
+        # else:
+        #     log.info("未发起新的聊天...")
+        #
+        # if not cls.config.debugger:
+        #     cls.print_result()
+    @classmethod
+    def post_job(cls, page, job:dict[str, Any]):
+        db = DatabaseManager()
+        job_id = job['id']
+        job_name = job["job_name"]
+        boss_company = job["boss_company"]
+
+        if any(black_job in job_name for black_job in cls.black_jobs):
+            db.add_post_record(job_id, "black_job", "")
+            return
+
+        if any(black_company in boss_company for black_company in cls.black_companies):
+            db.add_post_record(job_id, "black_company", "")
+            return
+
+        job_detail_url = job["job_detail_url"]
+        page.goto(job_detail_url, referer=job["referer"])
+        PlaywrightUtil.sleep(1)
+
+        detail_info = cls.extract_job_detail(job_id, page)
+        if not detail_info:
+            return
+        
+        job_desc = detail_info["job_desc"]
+        boss_name = detail_info["boss_name"]
+        keyword = job["key_word"]
+
+        # 创建Job对象
+        job_info = Job (
+            job_name=job_name,
+            salary=job["job_salary"],
+            job_area=job["tag_list"],
+            company_name=boss_company,
+            recruiter=boss_name,
+            job_info=job_desc) 
+
+        #
+        # 投递简历
+        # cls.resume_submission(page, keyword, job)
+        status = ResumeSubmission.resume_submission(page, keyword, job_info, cls.config, cls.ai_config, cls.result_list)
+        db.add_post_record(job_id, status)
+
+        
+    @classmethod
+    def post_all_jobs(cls):
+        db = DatabaseManager()
+        jobs = db.get_active_jobs()
+        cls.initialize_files()
+        cls.load_data(cls.DATA_PATH)
+
+        # 初始化配置
+        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+
+        # 使用Playwright获取岗位
+        PlaywrightUtil.init(DeviceType.DESKTOP)
+        cls.start_date = datetime.now()
+
+        # 登录
+        cls.login()
+        page = PlaywrightUtil.get_page_object()
+        for job in jobs:
+            cls.post_job(page, job)
+
+
+    @classmethod
     def main(cls):
         """主方法"""
         cls.initialize_files()
@@ -354,6 +448,166 @@ class Boss:
         """根据时间发送消息（占位实现）"""
         # 这里可以实现邮件、微信通知等功能
         pass
+
+    @classmethod
+    def extract_job_detail(cls, job_id, page) -> Optional[dict[str, Any]]:
+        """
+        从详情页面的特定 div 中提取公司、Boss及职位描述信息
+        """
+        # 1. 定位详情部分的主容器
+        db = DatabaseManager()
+        section = page.locator(".job-detail-section")
+        
+        # 确保元素存在
+        if section.count() == 0:
+            db.add_post_record(job_id, "page_error", "")
+            return None
+
+        section = section.first
+
+        # 2. 提取 Boss 姓名
+        # .name 下面包含 span 和 i，我们只需要第一行文本
+        boss_name_full = section.locator(".job-boss-info .name").inner_text()
+        boss_name = boss_name_full.split('\n')[0].strip()
+
+        # 4. 提取公司名称和 Boss 职位 (处理 "杭州越飞·股东")
+        attr_text = section.locator(".boss-info-attr").inner_text()
+        # 使用中点 '·' 分割字符串
+        if "·" in attr_text:
+            company, boss_title = [item.strip() for item in attr_text.split("·")]
+        else:
+            company, boss_title = attr_text.strip(), ""
+
+        if any(black_recruiter in boss_title for black_recruiter in cls.black_recruiters):
+            db.add_post_record(job_id, "black_recruiter")
+            return None
+
+        # 3. 提取 Boss 活跃状态
+        try:
+            active_time = section.locator(".boss-active-time").inner_text()
+        except:
+            active_time = "unknown"
+
+        if any(dead_status in active_time for dead_status in cls.config.dead_status):
+            db.add_post_record(job_id, "boss is not active", "")
+            return None
+
+        # 5. 提取职位描述 (job-sec-text)
+        try:
+            job_sec_text = section.locator(".job-sec-text").first.inner_text()
+        except:
+            job_sec_text = ""
+
+
+
+        # # 6. (可选) 提取职位关键词
+        # keywords = section.locator(".job-keyword-list li").all_inner_texts()
+
+        detail_info = {
+            "boss_company": company,
+            "boss_name": boss_name,
+            "boss_title": boss_title,
+            "boss_active": active_time,
+            "job_desc": job_sec_text.strip(),
+        }
+        log.info(f"提取到的职位详情: {detail_info}")
+        db.update_job(job_id, detail_info)
+        return detail_info
+
+    @classmethod
+    def get_job_card_info(cls, page) -> dict[str, Any]:
+        # 1. 定位所有的 job_card 元素
+        job_cards = page.locator(".job-card-box").all()
+        
+        results = {}
+
+        # 2. 循环遍历提取信息
+        for card in job_cards:
+            # 提取职位名称
+            job_name = card.locator(".job-name").inner_text()
+            
+            # 提取薪资 (提取到的是加密字符)
+            job_salary_raw = card.locator(".job-salary").inner_text()
+
+            job_salary = cls.decode_salary(job_salary_raw)
+            
+            # 提取标签列表 (5-10年, 本科等)
+            tags = card.locator(".tag-list li").all_inner_texts()
+            
+            # 提取 Boss/公司名称
+            boss_name = card.locator(".boss-name").inner_text()
+            
+            # 提取公司地点 (杭州)
+            location = card.locator(".company-location").inner_text()
+            
+            # 提取详情页链接并拼接完整 URL
+            href = card.locator(".job-title a").get_attribute("href")
+            job_detail_url = f"https://www.zhipin.com{href}" if href else ""
+
+            # 整理数据
+            item = { job_detail_url: {
+                "job_name": job_name.strip(),
+                "job_salary": job_salary.strip(),
+                "tag_list": " ".join(tags),
+                "boss_company": boss_name.strip(),
+                "company_location": location.strip(),
+                "job_detail_url": job_detail_url,
+                "referer": page.url
+                }
+            }
+            results |= item
+            # print(f"成功提取: {job_name} | {job_salary}")
+
+        # 打印最终结果
+        print(f"\n共抓取到 {len(results)} 条数据")
+        return results
+
+    @classmethod
+    def get_all_jobs_by_city(cls, city_code: str):
+        """按城市投递职位"""
+        search_url = cls.get_search_url(city_code)
+
+        for keyword in cls.config.keywords:
+            encoded_keyword = urllib.parse.quote(keyword)
+
+            url = search_url + "&query=" + encoded_keyword
+            log.info("投递地址: %s", search_url + "&query=" + keyword)
+
+            page = PlaywrightUtil.get_page_object()
+            page.goto(url)
+            # PlaywrightUtil.navigate(url)
+            PlaywrightUtil.sleep(5)
+
+            # 1. 滚动到底部，加载所有岗位卡片
+            results = {}
+            while True:
+                # 滑动到底部
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                PlaywrightUtil.sleep(1)
+
+                # 获取所有卡片数
+                #cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
+                last_count = len(results)
+                results |= cls.get_job_card_info(page)
+                current_count = len(results)
+
+                # 判断是否继续滑动
+                if current_count == last_count:
+                    break
+                #last_count = current_count
+
+            log.info("【%s】岗位已全部加载，总数:%d", keyword, last_count)
+
+            # 2. 回到页面顶部
+            page.evaluate("window.scrollTo(0, 0);")
+            PlaywrightUtil.sleep(1)
+
+            # 3. save to mysql
+            db = DatabaseManager()
+            for _, v in results.items():
+                v["key_word"] = keyword
+                db.add_job(v)
+
 
     @classmethod
     def post_job_by_city(cls, city_code: str):
