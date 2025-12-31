@@ -395,58 +395,58 @@ if __name__ == "__main__":
     # 创建数据表
     db.create_tables()
     
-    # 示例1: 添加职位信息
-    print("\n=== 添加职位信息 ===")
-    job_data = {
-        "job_name": "Python开发工程师",
-        "job_desc": "负责Python后端开发，使用Django/Flask框架",
-        "skills": "Python, Django, Flask, MySQL",
-        "key_word": "Python",
-        "job_salary": "15-25K",
-        "tag_list": "Python,后端开发",
-        "boss_name": "张经理",
-        "boss_company": "阿里巴巴",
-        "company_location": "杭州",
-        "boss_title": "招聘经理",
-        "boss_active": "3天内活跃",
-        "job_detail_url": "https://www.zhipin.com/job1",
-        "referer": "https://www.zhipin.com"
-    }
-    
-    job_id = db.add_job(job_data)
-    
-    # 示例2: 添加投递记录
-    if job_id:
-        print("\n=== 添加投递记录 ===")
-        post_id = db.add_post_record(job_id, "已投递", "AI分析通过")
-    
-    # 示例3: 查询职位信息
-    print("\n=== 查询职位信息 ===")
-    job = db.get_job_by_id(job_id)
-    if job:
-        print(f"职位名称: {job['job_name']}")
-        print(f"公司: {job['boss_company']}")
-        print(f"薪资: {job['job_salary']}")
-    
-    # 示例4: 查询投递记录
-    print("\n=== 查询投递记录 ===")
-    posts = db.get_posts_by_job_id(job_id)
-    for post in posts:
-        print(f"投递状态: {post['status']}, AI结果: {post['ai_result']}")
-        print(f"创建时间: {post['created_at']}, 更新时间: {post['updated_at']}")
-    
-    # 示例5: 根据投递状态查找职位
-    print("\n=== 根据投递状态查找职位 ===")
-    jobs_with_status = db.get_jobs_by_post_status("已投递")
-    for job in jobs_with_status:
-        print(f"职位: {job['job_name']}, 公司: {job['boss_company']}, 投递状态: {job['status']}")
-    
-    # 示例6: 获取统计信息
-    print("\n=== 统计信息 ===")
-    stats = db.get_statistics()
-    print(f"总职位数: {stats['total_jobs']}")
-    print(f"总投递数: {stats['total_posts']}")
-    print(f"状态统计: {stats['status_stats']}")
+    # # 示例1: 添加职位信息
+    # print("\n=== 添加职位信息 ===")
+    # job_data = {
+    #     "job_name": "Python开发工程师",
+    #     "job_desc": "负责Python后端开发，使用Django/Flask框架",
+    #     "skills": "Python, Django, Flask, MySQL",
+    #     "key_word": "Python",
+    #     "job_salary": "15-25K",
+    #     "tag_list": "Python,后端开发",
+    #     "boss_name": "张经理",
+    #     "boss_company": "阿里巴巴",
+    #     "company_location": "杭州",
+    #     "boss_title": "招聘经理",
+    #     "boss_active": "3天内活跃",
+    #     "job_detail_url": "https://www.zhipin.com/job1",
+    #     "referer": "https://www.zhipin.com"
+    # }
+    #
+    # job_id = db.add_job(job_data)
+    #
+    # # 示例2: 添加投递记录
+    # if job_id:
+    #     print("\n=== 添加投递记录 ===")
+    #     post_id = db.add_post_record(job_id, "已投递", "AI分析通过")
+    #
+    # # 示例3: 查询职位信息
+    # print("\n=== 查询职位信息 ===")
+    # job = db.get_job_by_id(job_id)
+    # if job:
+    #     print(f"职位名称: {job['job_name']}")
+    #     print(f"公司: {job['boss_company']}")
+    #     print(f"薪资: {job['job_salary']}")
+    #
+    # # 示例4: 查询投递记录
+    # print("\n=== 查询投递记录 ===")
+    # posts = db.get_posts_by_job_id(job_id)
+    # for post in posts:
+    #     print(f"投递状态: {post['status']}, AI结果: {post['ai_result']}")
+    #     print(f"创建时间: {post['created_at']}, 更新时间: {post['updated_at']}")
+    #
+    # # 示例5: 根据投递状态查找职位
+    # print("\n=== 根据投递状态查找职位 ===")
+    # jobs_with_status = db.get_jobs_by_post_status("已投递")
+    # for job in jobs_with_status:
+    #     print(f"职位: {job['job_name']}, 公司: {job['boss_company']}, 投递状态: {job['status']}")
+    #
+    # # 示例6: 获取统计信息
+    # print("\n=== 统计信息 ===")
+    # stats = db.get_statistics()
+    # print(f"总职位数: {stats['total_jobs']}")
+    # print(f"总投递数: {stats['total_posts']}")
+    # print(f"状态统计: {stats['status_stats']}")
     
     # 关闭连接
     db.close()
