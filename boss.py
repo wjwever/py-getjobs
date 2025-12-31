@@ -498,6 +498,10 @@ class Boss:
         except:
             job_sec_text = ""
 
+        #6, skills
+        skills = section.locator('ul.job-keyword-list li').all_text_contents()
+
+
 
 
         # # 6. (可选) 提取职位关键词
@@ -509,6 +513,7 @@ class Boss:
             "boss_title": boss_title,
             "boss_active": active_time,
             "job_desc": job_sec_text.strip(),
+            "skills" : " ".join(skills)
         }
         log.info(f"提取到的职位详情: {detail_info}")
         db.update_job(job_id, detail_info)
