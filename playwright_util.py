@@ -37,6 +37,7 @@ class PlaywrightUtil:
     def init(cls, device_type:DeviceType):
         """初始化Playwright及浏览器实例"""
         from playwright.sync_api import sync_playwright
+        cls.close()
         
         # 启动Playwright
         cls._playwright = sync_playwright().start()

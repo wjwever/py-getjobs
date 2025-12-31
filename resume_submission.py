@@ -1,3 +1,6 @@
+#
+#    THIS FILE is ABANDON, DELETE LATER
+#
 import logging
 import time
 from typing import Optional
@@ -6,8 +9,8 @@ from urllib.parse import urljoin
 from playwright.sync_api import Page
 
 from boss_config import BossConfig,AIConfig
-from job import Job
-from ai_filter import AiFilter
+from job_util import Job
+from ai_service import AiFilter
 from playwright_util import PlaywrightUtil
 from logger import log
 

@@ -5,17 +5,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Set, Dict, Optional, Any 
 
-from playwright.sync_api import Page, Locator
+from playwright.sync_api import Page 
 
-from boss_enum import BossEnum
 from boss_config import BossConfig, load_config_from_yaml, AIConfig
 from db.db import DatabaseManager
-import job
+from job_util import Job
 from playwright_util import PlaywrightUtil, DeviceType
 from locators import Locators
-from job import Job
 from logger import log
-from resume_submission import ResumeSubmission, safe_resume_submission
 
 class Boss:
     """Boss直聘自动化主类"""
@@ -23,7 +20,7 @@ class Boss:
     # 常量定义
     HOME_URL = "https://www.zhipin.com"
     BASE_URL = "https://www.zhipin.com/web/geek/job?"
-    DATA_PATH = "data/blacklist.json"
+    BLACK_LIST = "data/blacklist.json"
     COOKIE_PATH = "data/cookie.json"
 
     # 类变量
@@ -35,7 +32,7 @@ class Boss:
     config: BossConfig
     ai_config: AIConfig
 
-    ##### login start
+    #----------------------------------------------    login start     --------------------------------
     @classmethod
     def login(cls):
         """登录Boss直聘"""
@@ -184,114 +181,12 @@ class Boss:
             return False
 
         return False
-
-    # 增强的登录检查方法
+    #----------------------------------------------------- new jobs ----------------------------------------------
     @classmethod
-    def check_login_status(cls) -> bool:
-        """综合检查登录状态"""
-        page = PlaywrightUtil.get_page_object()
-
-        # 检查多个登录状态指标
-        login_indicators = [
-            # 未登录指标
-            Locators.LOGIN_BTNS,
-            "//button[contains(text(), '登录')]",
-            "//a[contains(text(), '登录')]",
-
-            # 已登录指标  
-            "//li[@class='nav-figure']//img",  # 用户头像
-            "//div[contains(@class, 'user-info')]",
-            Locators.JOB_LIST_CONTAINER
-        ]
-
-        for i, selector in enumerate(login_indicators):
-            try:
-                element = page.locator(selector)
-                if element.count() > 0:
-                    if i < 3:  # 前3个是未登录指标
-                        if element.first.is_visible():
-                            return False  # 需要登录
-                    else:  # 后几个是已登录指标
-                        if element.first.is_visible():
-                            return True  # 已登录
-            except Exception:
-                continue
-
-        # 通过URL判断
-        current_url = page.url
-        if "login" in current_url or "signin" in current_url:
-            return False
-
-        return True  # 默认认为已登录
-
-    @classmethod
-    def safe_login(cls, max_retries: int = 3):
-        """安全的登录流程，包含重试机制"""
-        for attempt in range(max_retries):
-            try:
-                log.info(f"登录尝试 {attempt + 1}/{max_retries}")
-
-                # 检查当前是否已登录
-                if cls.check_login_status():
-                    log.info("当前已处于登录状态")
-                    return True
-
-                # 执行登录流程
-                cls.login()
-
-                # 验证登录是否成功
-                if cls.check_login_status():
-                    log.info("登录成功！")
-                    return True
-                else:
-                    log.warning(f"登录验证失败，尝试 {attempt + 1}/{max_retries}")
-
-            except Exception as e:
-                log.error(f"登录过程中出现异常: {e}")
-
-            # 如果不是最后一次尝试，等待后重试
-            if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 10  # 递增等待时间
-                log.info(f"{wait_time}秒后重试登录...")
-                time.sleep(wait_time)
-
-        log.error(f"经过{max_retries}次尝试后登录失败")
-        return False
-    ######login end
-
-    @classmethod
-    def initialize_files(cls):
-        """初始化数据文件"""
-        try:
-            # 检查数据文件是否存在
-            data_file = Path(cls.DATA_PATH)
-            if not data_file.exists():
-                data_file.parent.mkdir(parents=True, exist_ok=True)
-                initial_data = {
-                    "blackCompanies": [],
-                    "blackRecruiters": [],
-                    "blackJobs": []
-                }
-                with open(data_file, 'w', encoding='utf-8') as f:
-                    json.dump(initial_data, f, ensure_ascii=False, indent=2)
-                log.info(f"创建数据文件: {cls.DATA_PATH}")
-
-            # 检查cookie文件是否存在
-            cookie_file = Path(cls.COOKIE_PATH)
-            if not cookie_file.exists():
-                cookie_file.parent.mkdir(parents=True, exist_ok=True)
-                with open(cookie_file, 'w', encoding='utf-8') as f:
-                    json.dump([], f)
-                log.info(f"创建cookie文件: {cls.COOKIE_PATH}")
-
-        except Exception as e:
-            log.error(f"创建文件时发生异常: {e}")
-
-    @classmethod
-    def get_all_jobs(cls):
+    def new_jobs(cls):
         """主方法"""
         cls.initialize_files()
-        cls.load_data(cls.DATA_PATH)
+        cls.load_black_list(cls.BLACK_LIST)
 
         # 初始化配置
         cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
@@ -307,217 +202,51 @@ class Boss:
         for city_code in cls.config.city_code:
             cls.get_all_jobs_by_city(city_code)
 
-        # 输出结果
-        # if cls.result_list:
-        #     log.info("新发起聊天公司如下:\n%s", "\n".join(str(job) for job in cls.result_list))
-        # else:
-        #     log.info("未发起新的聊天...")
-        #
-        # if not cls.config.debugger:
-        #     cls.print_result()
     @classmethod
-    def post_job(cls, page, job:dict[str, Any]):
-        db = DatabaseManager()
-        job_id = job['id']
-        job_name = job["job_name"]
-        boss_company = job["boss_company"]
+    def get_all_jobs_by_city(cls, city_code: str):
+        """按城市投递职位"""
+        search_url = cls.get_search_url(city_code)
 
-        if any(black_job in job_name for black_job in cls.black_jobs):
-            db.add_post_record(job_id, "black_job", "")
-            return
+        for keyword in cls.config.keywords:
+            encoded_keyword = urllib.parse.quote(keyword)
 
-        if any(black_company in boss_company for black_company in cls.black_companies):
-            db.add_post_record(job_id, "black_company", "")
-            return
+            url = search_url + "&query=" + encoded_keyword
+            log.info("投递地址: %s", search_url + "&query=" + keyword)
 
-        job_detail_url = job["job_detail_url"]
-        page.goto(job_detail_url, referer=job["referer"])
-        PlaywrightUtil.sleep(1)
+            page = PlaywrightUtil.get_page_object()
+            page.goto(url)
+            # PlaywrightUtil.navigate(url)
+            PlaywrightUtil.sleep(5)
 
-        detail_info = cls.extract_job_detail(job_id, page)
-        if not detail_info:
-            return
-        
-        job_desc = detail_info["job_desc"]
-        boss_name = detail_info["boss_name"]
-        keyword = job["key_word"]
+            # 1. 滚动到底部，加载所有岗位卡片
+            results = {}
+            while True:
+                # 滑动到底部
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                PlaywrightUtil.sleep(1)
 
-        # 创建Job对象
-        job_info = Job (
-            job_name=job_name,
-            salary=job["job_salary"],
-            job_area=job["tag_list"],
-            company_name=boss_company,
-            recruiter=boss_name,
-            job_info=job_desc) 
+                # 获取所有卡片数
+                #cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
+                last_count = len(results)
+                results |= cls.get_job_card_info(page)
+                current_count = len(results)
 
-        #
-        # 投递简历
-        # cls.resume_submission(page, keyword, job)
-        status = ResumeSubmission.resume_submission(page, keyword, job_info, cls.config, cls.ai_config, cls.result_list)
-        db.add_post_record(job_id, status)
+                # 判断是否继续滑动
+                if current_count == last_count:
+                    break
+                #last_count = current_count
 
-        
-    @classmethod
-    def post_all_jobs(cls):
-        db = DatabaseManager()
-        jobs = db.get_active_jobs()
-        cls.initialize_files()
-        cls.load_data(cls.DATA_PATH)
+            log.info("【%s】岗位已全部加载，总数:%d", keyword, last_count)
 
-        # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+            # 2. 回到页面顶部
+            page.evaluate("window.scrollTo(0, 0);")
+            PlaywrightUtil.sleep(1)
 
-        # 使用Playwright获取岗位
-        PlaywrightUtil.init(DeviceType.DESKTOP)
-        cls.start_date = datetime.now()
-
-        # 登录
-        cls.login()
-        page = PlaywrightUtil.get_page_object()
-        for job in jobs:
-            cls.post_job(page, job)
-
-
-    @classmethod
-    def main(cls):
-        """主方法"""
-        cls.initialize_files()
-        cls.load_data(cls.DATA_PATH)
-
-        # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
-
-        # 使用Playwright获取岗位
-        PlaywrightUtil.init(DeviceType.DESKTOP)
-        cls.start_date = datetime.now()
-
-        # 登录
-        cls.login()
-
-        # 按城市投递
-        for city_code in cls.config.city_code:
-            cls.post_job_by_city(city_code)
-
-        # 输出结果
-        if cls.result_list:
-            log.info("新发起聊天公司如下:\n%s", "\n".join(str(job) for job in cls.result_list))
-        else:
-            log.info("未发起新的聊天...")
-
-        if not cls.config.debugger:
-            cls.print_result()
-
-    @classmethod
-    def print_result(cls):
-        """打印结果并清理资源"""
-        duration = datetime.now() - cls.start_date
-        message = f"\nBoss投递完成，共发起{len(cls.result_list)}个聊天，用时{cls.format_duration(duration)}"
-        log.info(message)
-
-        # 发送消息（如果需要）
-        cls.send_message_by_time(message)
-
-        # 保存数据
-        cls.save_data(cls.DATA_PATH)
-        cls.result_list.clear()
-
-        if not cls.config.debugger:
-            PlaywrightUtil.close()
-
-        # 等待日志写入完成
-        time.sleep(1)
-
-    @classmethod
-    def format_duration(cls, duration) -> str:
-        """格式化时间间隔"""
-        total_seconds = int(duration.total_seconds())
-        hours = total_seconds // 3600
-        minutes = (total_seconds % 3600) // 60
-        seconds = total_seconds % 60
-
-        if hours > 0:
-            return f"{hours}小时{minutes}分{seconds}秒"
-        elif minutes > 0:
-            return f"{minutes}分{seconds}秒"
-        else:
-            return f"{seconds}秒"
-
-    @classmethod
-    def send_message_by_time(cls, message: str):
-        """根据时间发送消息（占位实现）"""
-        # 这里可以实现邮件、微信通知等功能
-        pass
-
-    @classmethod
-    def extract_job_detail(cls, job_id, page) -> Optional[dict[str, Any]]:
-        """
-        从详情页面的特定 div 中提取公司、Boss及职位描述信息
-        """
-        # 1. 定位详情部分的主容器
-        db = DatabaseManager()
-        section = page.locator(".job-detail-section")
-        
-        # 确保元素存在
-        if section.count() == 0:
-            db.add_post_record(job_id, "page_error", "")
-            return None
-
-        section = section.first
-
-        # 2. 提取 Boss 姓名
-        # .name 下面包含 span 和 i，我们只需要第一行文本
-        boss_name_full = section.locator(".job-boss-info .name").inner_text()
-        boss_name = boss_name_full.split('\n')[0].strip()
-
-        # 4. 提取公司名称和 Boss 职位 (处理 "杭州越飞·股东")
-        attr_text = section.locator(".boss-info-attr").inner_text()
-        # 使用中点 '·' 分割字符串
-        if "·" in attr_text:
-            company, boss_title = [item.strip() for item in attr_text.split("·")]
-        else:
-            company, boss_title = attr_text.strip(), ""
-
-        if any(black_recruiter in boss_title for black_recruiter in cls.black_recruiters):
-            db.add_post_record(job_id, "black_recruiter")
-            return None
-
-        # 3. 提取 Boss 活跃状态
-        try:
-            active_time = section.locator(".boss-active-time").inner_text()
-        except:
-            active_time = "unknown"
-
-        if any(dead_status in active_time for dead_status in cls.config.dead_status):
-            db.add_post_record(job_id, "boss is not active", "")
-            return None
-
-        # 5. 提取职位描述 (job-sec-text)
-        try:
-            job_sec_text = section.locator(".job-sec-text").first.inner_text()
-        except:
-            job_sec_text = ""
-
-        #6, skills
-        skills = section.locator('ul.job-keyword-list li').all_text_contents()
-
-
-
-
-        # # 6. (可选) 提取职位关键词
-        # keywords = section.locator(".job-keyword-list li").all_inner_texts()
-
-        detail_info = {
-            "boss_company": company,
-            "boss_name": boss_name,
-            "boss_title": boss_title,
-            "boss_active": active_time,
-            "job_desc": job_sec_text.strip(),
-            "skills" : " ".join(skills)
-        }
-        log.info(f"提取到的职位详情: {detail_info}")
-        db.update_job(job_id, detail_info)
-        return detail_info
+            # 3. save to mysql
+            db = DatabaseManager()
+            for _, v in results.items():
+                v["key_word"] = keyword
+                db.add_job(v)
 
     @classmethod
     def get_job_card_info(cls, page) -> dict[str, Any]:
@@ -566,220 +295,266 @@ class Boss:
         # 打印最终结果
         print(f"\n共抓取到 {len(results)} 条数据")
         return results
+    #----------------------------------------------------- detail info ----------------------------------------------
+    @classmethod
+    def update_job_detail_info(cls):
+        db = DatabaseManager()
+        jobs = db.search_jobs_by_field_value("job_desc", "")
+
+        cls.initialize_files()
+        cls.load_black_list(cls.BLACK_LIST)
+
+        # 初始化配置
+        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+
+        # 使用Playwright获取岗位
+        PlaywrightUtil.init(DeviceType.DESKTOP)
+        cls.start_date = datetime.now()
+
+        # 登录
+        cls.login()
+        page = PlaywrightUtil.get_page_object()
+        for job in jobs:
+            cls.fill_in_detail_info(page, job)
 
     @classmethod
-    def get_all_jobs_by_city(cls, city_code: str):
-        """按城市投递职位"""
-        search_url = cls.get_search_url(city_code)
-
-        for keyword in cls.config.keywords:
-            encoded_keyword = urllib.parse.quote(keyword)
-
-            url = search_url + "&query=" + encoded_keyword
-            log.info("投递地址: %s", search_url + "&query=" + keyword)
-
-            page = PlaywrightUtil.get_page_object()
-            page.goto(url)
-            # PlaywrightUtil.navigate(url)
-            PlaywrightUtil.sleep(5)
-
-            # 1. 滚动到底部，加载所有岗位卡片
-            results = {}
-            while True:
-                # 滑动到底部
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                PlaywrightUtil.sleep(1)
-
-                # 获取所有卡片数
-                #cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
-                last_count = len(results)
-                results |= cls.get_job_card_info(page)
-                current_count = len(results)
-
-                # 判断是否继续滑动
-                if current_count == last_count:
-                    break
-                #last_count = current_count
-
-            log.info("【%s】岗位已全部加载，总数:%d", keyword, last_count)
-
-            # 2. 回到页面顶部
-            page.evaluate("window.scrollTo(0, 0);")
-            PlaywrightUtil.sleep(1)
-
-            # 3. save to mysql
-            db = DatabaseManager()
-            for _, v in results.items():
-                v["key_word"] = keyword
-                db.add_job(v)
+    def fill_in_detail_info(cls, page, job:dict[str, Any]):
+        db = DatabaseManager()
+        job_id = job['id']
+        job_name = job["job_name"]
+        boss_company = job["boss_company"]
 
 
-    @classmethod
-    def post_job_by_city(cls, city_code: str):
-        """按城市投递职位"""
-        search_url = cls.get_search_url(city_code)
+        job_detail_url = job["job_detail_url"]
+        page.goto(job_detail_url, referer=job["referer"])
+        PlaywrightUtil.sleep(1)
+        section = page.locator(".job-detail-section")
+        
+        if section.count() == 0:
+            db.delete_job(job_id=job_id)
+            return
 
-        for keyword in cls.config.keywords:
-            post_count = 0
-            encoded_keyword = urllib.parse.quote(keyword)
+        section = section.first
 
-            url = search_url + "&query=" + encoded_keyword
-            log.info("投递地址: %s", search_url + "&query=" + keyword)
+        try:
+            job_sec_text = section.locator(".job-sec-text").first.inner_text()
+        except:
+            job_sec_text = ""
 
-            page = PlaywrightUtil.get_page_object()
-            page.goto(url)
-            PlaywrightUtil.sleep(2)
+        # .name 下面包含 span 和 i，我们只需要第一行文本
+        boss_name_full = section.locator(".job-boss-info .name").inner_text()
+        boss_name = boss_name_full.split('\n')[0].strip()
 
-            # 1. 滚动到底部，加载所有岗位卡片
-            last_count = -1
-            while True:
-                # 滑动到底部
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                PlaywrightUtil.sleep(1)
+        attr_text = section.locator(".boss-info-attr").inner_text()
+        # 使用中点 '·' 分割字符串
+        if "·" in attr_text:
+            company, boss_title = [item.strip() for item in attr_text.split("·")]
+        else:
+            company, boss_title = attr_text.strip(), ""
 
-                # 获取所有卡片数
-                cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
-                current_count = cards.count()
+        try:
+            active_time = section.locator(".boss-active-time").inner_text()
+        except:
+            active_time = ""
 
-                # 判断是否继续滑动
-                if current_count == last_count:
-                    break
-                last_count = current_count
+        try:
+            skills = section.locator('ul.job-keyword-list li').all_text_contents()
+        except:
+            skills = ""
 
-            log.info("【%s】岗位已全部加载，总数:%d", keyword, last_count)
-
-            # 2. 回到页面顶部
-            page.evaluate("window.scrollTo(0, 0);")
-            PlaywrightUtil.sleep(1)
-
-            # 3. 逐个遍历所有岗位
-            cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
-            count = cards.count()
-
-            for i in range(count):
-                # 重新获取卡片，避免元素过期
-                cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
-                cards.nth(i).click()
-                PlaywrightUtil.sleep(1)
-
-                # 等待详情内容加载
-                detail_box = page.locator("div[class*='job-detail-box']")
-                detail_box.wait_for(timeout=4000)
-
-                # 提取职位信息
-                job_name = cls.safe_text(detail_box, "span[class*='job-name']")
-                if any(black_job in job_name for black_job in cls.black_jobs):
-                    continue
-
-                job_salary_raw = cls.safe_text(detail_box, "span.job-salary")
-                job_salary = cls.decode_salary(job_salary_raw)
-
-                tags = cls.safe_all_text(detail_box, "ul[class*='tag-list'] > li")
-                job_desc = cls.safe_text(detail_box, "p.desc")
-                #log.info("job_desc:%s", job_desc)
-
-                boss_name_raw = cls.safe_text(detail_box, "h2[class*='name']")
-                boss_name, boss_active = cls.split_boss_name(boss_name_raw)
-
-                boss_title_raw = cls.safe_text(detail_box, "div[class*='boss-info-attr']")
-                boss_company, boss_job_title = cls.split_boss_title(boss_title_raw)
-                log.info("%s %s %s %s", boss_company, boss_name, boss_job_title, job_salary)
-
-                if any(dead_status in boss_active for dead_status in cls.config.dead_status):
-                    log.info("boss is not active")
-                    continue
-
-                if any(black_company in boss_company for black_company in cls.black_companies):
-                    log.info("black company: %s", boss_company)
-                    continue
-                if any(black_recruiter in boss_job_title for black_recruiter in cls.black_recruiters):
-                    log.info("black recruiter:%s", boss_job_title)
-                    continue
-
-                # 创建Job对象
-                job = Job(
-                    job_name=job_name,
-                    salary=job_salary,
-                    job_area=", ".join(tags),
-                    company_name=boss_company,
-                    recruiter=boss_name,
-                    job_info=job_desc
-                )
-
-                # 投递简历
-                # cls.resume_submission(page, keyword, job)
-                if ResumeSubmission.resume_submission(page, keyword, job, cls.config, cls.ai_config, cls.result_list):
-                    post_count += 1
-
-            log.info("【%s】岗位已投递完毕！已投递岗位数量:%d", keyword, post_count)
-
-    @classmethod
-    def decode_salary(cls, text: str) -> str:
-        """解码薪资字体"""
-        font_map = {
-            '': '0', '': '1', '': '2', '': '3', '': '4',
-            '': '5', '': '6', '': '7', '': '8', '': '9'
+        detail_info = {
+            "boss_company": company,
+            "boss_name": boss_name,
+            "boss_title": boss_title,
+            "boss_active": active_time,
+            "job_desc": job_sec_text.strip(),
+            "skills" : " ".join(skills)
         }
-        result = []
-        for char in text:
-            result.append(font_map.get(char, char))
-        return ''.join(result)
+        log.info(f"提取到的职位详情: {detail_info}")
+        db.update_job(job_id, detail_info)
+
+        if any(black_job in job_name for black_job in cls.black_jobs):
+            db.add_post_record(job_id, "black_job", "")
+
+        elif any(black_company in boss_company for black_company in cls.black_companies):
+            db.add_post_record(job_id, "black_company", "")
+
+        elif any(black_recruiter in boss_title for black_recruiter in cls.black_recruiters):
+            db.add_post_record(job_id, "black_recruiter")
+
+        elif any(dead_status in active_time for dead_status in cls.config.dead_status):
+            db.add_post_record(job_id, "boss is not active", "")
+
+        # 投递简历
+        # status = ResumeSubmission.resume_submission(page, keyword, job_info, cls.config, cls.ai_config, cls.result_list)
+        # db.add_post_record(job_id, status)
+    #----------------------------------------------------- post_jobs ----------------------------------------------
+    @classmethod
+    def post_jobs(cls):
+        db = DatabaseManager()
+        jobs = db.get_active_jobs()
+
+        cls.initialize_files()
+        cls.load_black_list(cls.BLACK_LIST)
+
+        # 初始化配置
+        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+
+        # 使用Playwright获取岗位
+        PlaywrightUtil.init(DeviceType.DESKTOP)
+        cls.start_date = datetime.now()
+
+        # 登录
+        cls.login()
+        page = PlaywrightUtil.get_page_object()
+        for job in jobs:
+            cls.post_job(page, job)
 
     @classmethod
-    def safe_text(cls, root: Locator, selector: str) -> str:
-        """安全获取单个文本内容"""
-        node = root.locator(selector)
+    def post_job(cls, page, job:dict[str, Any]):
+        job_id = job["id"]
+        if not job["job_desc"]:
+            log.error(f"jobid:{job_id} empty job desc")
+            return
+
+        db = DatabaseManager()
+        say_hi = cls.config.say_hi.replace("[\r\n]", "")
+        match:bool = True
+        ai_result:str = ""
+        if cls.config.enable_ai:
+            try:
+                from ai_service import AIService
+                bot = AIService(cls.ai_config)
+                ai_result = bot.chat(job['job_desc'])
+                obj = json.loads(ai_result)
+                match = obj["match"]
+                say_hi = obj["hi"]
+            except Exception as e:
+                log.error(f"ai chat error {e}")
+
+        if match == False:
+            db.add_post_record(job_id, "ai_filtered", ai_result)
+            return
+
         try:
-            if node.count() > 0 and node.text_content():
-                return node.text_content().strip()
-        except Exception:
-            pass
-        return ""
+            page.goto(job["job_detail_url"], referer=job["referer"])
+            PlaywrightUtil.sleep(3)  # 页面加载
+            detail_page = page
+
+            # 3. 查找"立即沟通"按钮
+            chat_btn = detail_page.locator("a.btn-startchat, a.op-btn-chat")
+            found_chat_btn = False
+            for _ in range(10):
+                if chat_btn.count() > 0:
+                    text_content = chat_btn.first.text_content()
+                    if text_content and "立即沟通" in text_content:
+                        found_chat_btn = True
+                        break
+                PlaywrightUtil.sleep(3)
+            
+            if not found_chat_btn:
+                log.warning("未找到立即沟通按钮，跳过岗位: %d", job_id)
+                db.add_post_record(job_id, "page_error", ai_result)
+                return
+            
+            chat_btn.first.click()
+            PlaywrightUtil.sleep(1)
+
+            # 4. 等待聊天输入框
+            input_locator = detail_page.locator("div#chat-input.chat-input[contenteditable='true'], textarea.input-area")
+            input_ready = False
+            for _ in range(10):
+                if input_locator.count() > 0 and input_locator.first.is_visible():
+                    input_ready = True
+                    break
+                PlaywrightUtil.sleep(3)
+            
+            if not input_ready:
+                log.warning("聊天输入框未出现，跳过: %d", job_id)
+                db.add_post_record(job_id, "page_error", ai_result)
+                return
+
+
+            # 输入打招呼语
+            message = say_hi
+            input_element = input_locator.first
+            input_element.click()
+            
+            # 判断元素类型并输入文本
+            tag_name = input_element.evaluate("el => el.tagName.toLowerCase()")
+            if tag_name == "textarea":
+                input_element.fill(message)
+            else:
+                input_element.evaluate("(el, msg) => el.innerText = msg", message)
+
+            img_resume = False
+            if cls.config.send_img_resume:
+                try:
+                    # 查找图片简历文件
+                    resume_path = cls.find_resume_image()
+                    if resume_path:
+                        log.info("找到图片简历")
+                        file_input = detail_page.locator("//div[@aria-label='发送图片']//input[@type='file']")
+                        if file_input.count() > 0:
+                            file_input.set_input_files(resume_path)
+                            img_resume = True
+                except Exception as e:
+                    log.error("发送图片简历失败: %s", e)
+
+            send_btn = detail_page.locator("div.send-message, button[type='send'].btn-send, button.btn-send")
+            send_success = False
+            if send_btn.count() > 0:
+                send_btn.first.click()
+                PlaywrightUtil.sleep(1)
+                send_success = True
+            else:
+                log.warning("未找到发送按钮，自动跳过！岗位：%d", job_id)
+
+            log.info("投递完成 | 岗位：%s | 招呼语：%s | 图片简历：%s", 
+                        job["job_name"], message, "已发送" if img_resume else "未发送")
+
+            PlaywrightUtil.sleep(1)
+
+            if send_success:
+                db.add_post_record(job_id, "post_ok", ai_result)
+            else:
+                db.add_post_record(job_id, "post_failure", ai_result)
+            return
+        except Exception as e:
+            log.error(f"post job exception: {e}")
+            db.add_post_record(job_id, "post_failure", ai_result)
 
     @classmethod
-    def safe_all_text(cls, root: Locator, selector: str) -> List[str]:
-        """安全获取多个文本内容"""
+    def find_resume_image(cls) -> Optional[Path]:
+        """
+        查找图片简历文件
+        
+        Returns:
+            Path: 图片文件路径，如果未找到返回None
+        """
+        # 在多个可能的位置查找简历图片
+        possible_paths = [
+            Path("resume.jpg"),
+            Path("resources/resume.jpg"),
+            Path("src/main/resources/resume.jpg"),
+            Path("static/resume.jpg"),
+            Path("assets/resume.jpg"),
+        ]
+        
+        for path in possible_paths:
+            if path.exists():
+                return path
+        
+        log.warning("未找到简历图片文件")
+        return None
+
+    #----------------------------------------------------- update black list ----------------------------------------------
+    @classmethod
+    def save_black_list(cls):
+        """保存黑名单数据"""
+        path = cls.BLACK_LIST
         try:
-            return root.locator(selector).all_text_contents()
-        except Exception:
-            return []
-
-    @classmethod
-    def split_boss_name(cls, raw: str) -> tuple[str, str]:
-        """拆分Boss姓名和活跃状态"""
-        boss_parts = raw.strip().split()
-        boss_name = boss_parts[0] if boss_parts else ""
-        boss_active = " ".join(boss_parts[1:]) if len(boss_parts) > 1 else ""
-        return boss_name, boss_active
-
-    @classmethod
-    def split_boss_title(cls, raw: str) -> tuple[str, str]:
-        """拆分Boss公司和职位"""
-        parts = raw.strip().split(" · ")
-        company = parts[0] if parts else ""
-        job = parts[1] if len(parts) > 1 else ""
-        return company, job
-
-    @classmethod
-    def get_search_url(cls, city_code: str) -> str:
-        """构建搜索URL"""
-        from job_util import JobUtils  # 需要创建这个工具类
-
-        return (cls.BASE_URL + 
-            JobUtils.append_param("city", city_code) +
-            JobUtils.append_param("jobType", cls.config.job_type) +
-            JobUtils.append_param("salary", cls.config.salary) +
-            JobUtils.append_list_param("experience", cls.config.experience) +
-            JobUtils.append_list_param("degree", cls.config.degree) +
-            JobUtils.append_list_param("scale", cls.config.scale) +
-            JobUtils.append_list_param("industry", cls.config.industry) +
-            JobUtils.append_list_param("stage", cls.config.stage))
-
-    @classmethod
-    def save_data(cls, path: str):
-        """保存数据到文件"""
-        try:
-            cls.update_list_data()
+            cls.update_black_list()
             data = {
                 "blackCompanies": list(cls.black_companies),
                 "blackRecruiters": list(cls.black_recruiters),
@@ -791,7 +566,7 @@ class Boss:
             log.error("保存【%s】数据失败！%s", path, e)
 
     @classmethod
-    def update_list_data(cls):
+    def update_black_list(cls):
         """更新黑名单数据"""
         page = PlaywrightUtil.get_page_object()
         page.goto("https://www.zhipin.com/web/geek/chat")
@@ -835,7 +610,7 @@ class Boss:
                             PlaywrightUtil.sleep(1)
 
                     if company_name and message:
-                        match = any(keyword in message for keyword in ["不", "感谢", "但", "遗憾", "需要本", "对不"])
+                        match = any(keyword in message for keyword in ["但是很遗憾", "不匹配"])
                         nomatch = any(keyword in message for keyword in ["不是", "不生"])
 
                         if match and not nomatch:
@@ -863,8 +638,36 @@ class Boss:
 
         log.info("黑名单公司数量：%d", len(cls.black_companies))
 
+    #----------------------------------------------------- tools ----------------------------------------------
     @classmethod
-    def load_data(cls, path: str):
+    def decode_salary(cls, text: str) -> str:
+        """解码薪资字体"""
+        font_map = {
+            '': '0', '': '1', '': '2', '': '3', '': '4',
+            '': '5', '': '6', '': '7', '': '8', '': '9'
+        }
+        result = []
+        for char in text:
+            result.append(font_map.get(char, char))
+        return ''.join(result)
+
+    @classmethod
+    def get_search_url(cls, city_code: str) -> str:
+        """构建搜索URL"""
+        from job_util import JobUtils  # 需要创建这个工具类
+
+        return (cls.BASE_URL + 
+            JobUtils.append_param("city", city_code) +
+            JobUtils.append_param("jobType", cls.config.job_type) +
+            JobUtils.append_param("salary", cls.config.salary) +
+            JobUtils.append_list_param("experience", cls.config.experience) +
+            JobUtils.append_list_param("degree", cls.config.degree) +
+            JobUtils.append_list_param("scale", cls.config.scale) +
+            JobUtils.append_list_param("industry", cls.config.industry) +
+            JobUtils.append_list_param("stage", cls.config.stage))
+
+    @classmethod
+    def load_black_list(cls, path: str):
         """从文件加载数据"""
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -880,8 +683,239 @@ class Boss:
         cls.black_recruiters = set(data.get("blackRecruiters", []))
         cls.black_jobs = set(data.get("blackJobs", []))
 
-    # 由于代码量很大，这里只展示了主要方法
-    # 其他方法如 resume_submission, login, wait_for_slider_verify 等需要根据之前转换的代码进行整合
+    @classmethod
+    def initialize_files(cls):
+        """初始化数据文件"""
+        try:
+            # 检查数据文件是否存在
+            data_file = Path(cls.BLACK_LIST)
+            if not data_file.exists():
+                data_file.parent.mkdir(parents=True, exist_ok=True)
+                initial_data = {
+                    "blackCompanies": [],
+                    "blackRecruiters": [],
+                    "blackJobs": []
+                }
+                with open(data_file, 'w', encoding='utf-8') as f:
+                    json.dump(initial_data, f, ensure_ascii=False, indent=2)
+                log.info(f"创建数据文件: {cls.BLACK_LIST}")
 
-# if __name__ == "__main__":
-#     Boss.main()
+            # 检查cookie文件是否存在
+            cookie_file = Path(cls.COOKIE_PATH)
+            if not cookie_file.exists():
+                cookie_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(cookie_file, 'w', encoding='utf-8') as f:
+                    json.dump([], f)
+                log.info(f"创建cookie文件: {cls.COOKIE_PATH}")
+
+        except Exception as e:
+            log.error(f"创建文件时发生异常: {e}")
+
+    #----------------------------------------------------- abandon ----------------------------------------------
+    # @classmethod
+    # def main(cls):
+    #     """主方法"""
+    #     cls.initialize_files()
+    #     cls.load_black_list(cls.BLACK_LIST)
+    #
+    #     # 初始化配置
+    #     cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+    #
+    #     # 使用Playwright获取岗位
+    #     PlaywrightUtil.init(DeviceType.DESKTOP)
+    #     cls.start_date = datetime.now()
+    #
+    #     # 登录
+    #     cls.login()
+    #
+    #     # 按城市投递
+    #     for city_code in cls.config.city_code:
+    #         cls.post_job_by_city(city_code)
+    #
+    #     # 输出结果
+    #     if cls.result_list:
+    #         log.info("新发起聊天公司如下:\n%s", "\n".join(str(job) for job in cls.result_list))
+    #     else:
+    #         log.info("未发起新的聊天...")
+    #
+    #     if not cls.config.debugger:
+    #         cls.print_result()
+
+    # @classmethod
+    # def print_result(cls):
+    #     """打印结果并清理资源"""
+    #     duration = datetime.now() - cls.start_date
+    #     message = f"\nBoss投递完成，共发起{len(cls.result_list)}个聊天，用时{cls.format_duration(duration)}"
+    #     log.info(message)
+    #
+    #     # 发送消息（如果需要）
+    #     cls.send_message_by_time(message)
+    #
+    #     # 保存数据
+    #     cls.save_data(cls.BLACK_LIST)
+    #     cls.result_list.clear()
+    #
+    #     if not cls.config.debugger:
+    #         PlaywrightUtil.close()
+    #
+    #     # 等待日志写入完成
+    #     time.sleep(1)
+
+    # @classmethod
+    # def format_duration(cls, duration) -> str:
+    #     """格式化时间间隔"""
+    #     total_seconds = int(duration.total_seconds())
+    #     hours = total_seconds // 3600
+    #     minutes = (total_seconds % 3600) // 60
+    #     seconds = total_seconds % 60
+    #
+    #     if hours > 0:
+    #         return f"{hours}小时{minutes}分{seconds}秒"
+    #     elif minutes > 0:
+    #         return f"{minutes}分{seconds}秒"
+    #     else:
+    #         return f"{seconds}秒"
+
+    # @classmethod
+    # def send_message_by_time(cls, message: str):
+    #     """根据时间发送消息（占位实现）"""
+    #     # 这里可以实现邮件、微信通知等功能
+    #     pass
+    
+    # @classmethod
+    # def post_job_by_city(cls, city_code: str):
+    #     """按城市投递职位"""
+    #     search_url = cls.get_search_url(city_code)
+    #
+    #     for keyword in cls.config.keywords:
+    #         post_count = 0
+    #         encoded_keyword = urllib.parse.quote(keyword)
+    #
+    #         url = search_url + "&query=" + encoded_keyword
+    #         log.info("投递地址: %s", search_url + "&query=" + keyword)
+    #
+    #         page = PlaywrightUtil.get_page_object()
+    #         page.goto(url)
+    #         PlaywrightUtil.sleep(2)
+    #
+    #         # 1. 滚动到底部，加载所有岗位卡片
+    #         last_count = -1
+    #         while True:
+    #             # 滑动到底部
+    #             page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+    #             PlaywrightUtil.sleep(1)
+    #
+    #             # 获取所有卡片数
+    #             cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
+    #             current_count = cards.count()
+    #
+    #             # 判断是否继续滑动
+    #             if current_count == last_count:
+    #                 break
+    #             last_count = current_count
+    #
+    #         log.info("【%s】岗位已全部加载，总数:%d", keyword, last_count)
+    #
+    #         # 2. 回到页面顶部
+    #         page.evaluate("window.scrollTo(0, 0);")
+    #         PlaywrightUtil.sleep(1)
+    #
+    #         # 3. 逐个遍历所有岗位
+    #         cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
+    #         count = cards.count()
+    #
+    #         for i in range(count):
+    #             # 重新获取卡片，避免元素过期
+    #             cards = page.locator("//ul[contains(@class, 'rec-job-list')]//li[contains(@class, 'job-card-box')]")
+    #             cards.nth(i).click()
+    #             PlaywrightUtil.sleep(1)
+    #
+    #             # 等待详情内容加载
+    #             detail_box = page.locator("div[class*='job-detail-box']")
+    #             detail_box.wait_for(timeout=4000)
+    #
+    #             # 提取职位信息
+    #             job_name = cls.safe_text(detail_box, "span[class*='job-name']")
+    #             if any(black_job in job_name for black_job in cls.black_jobs):
+    #                 continue
+    #
+    #             job_salary_raw = cls.safe_text(detail_box, "span.job-salary")
+    #             job_salary = cls.decode_salary(job_salary_raw)
+    #
+    #             tags = cls.safe_all_text(detail_box, "ul[class*='tag-list'] > li")
+    #             job_desc = cls.safe_text(detail_box, "p.desc")
+    #             #log.info("job_desc:%s", job_desc)
+    #
+    #             boss_name_raw = cls.safe_text(detail_box, "h2[class*='name']")
+    #             boss_name, boss_active = cls.split_boss_name(boss_name_raw)
+    #
+    #             boss_title_raw = cls.safe_text(detail_box, "div[class*='boss-info-attr']")
+    #             boss_company, boss_job_title = cls.split_boss_title(boss_title_raw)
+    #             log.info("%s %s %s %s", boss_company, boss_name, boss_job_title, job_salary)
+    #
+    #             if any(dead_status in boss_active for dead_status in cls.config.dead_status):
+    #                 log.info("boss is not active")
+    #                 continue
+    #
+    #             if any(black_company in boss_company for black_company in cls.black_companies):
+    #                 log.info("black company: %s", boss_company)
+    #                 continue
+    #             if any(black_recruiter in boss_job_title for black_recruiter in cls.black_recruiters):
+    #                 log.info("black recruiter:%s", boss_job_title)
+    #                 continue
+    #
+    #             # 创建Job对象
+    #             job = Job(
+    #                 job_name=job_name,
+    #                 salary=job_salary,
+    #                 job_area=", ".join(tags),
+    #                 company_name=boss_company,
+    #                 recruiter=boss_name,
+    #                 job_info=job_desc
+    #             )
+    #
+    #             # 投递简历
+    #             # cls.resume_submission(page, keyword, job)
+    #             if ResumeSubmission.resume_submission(page, keyword, job, cls.config, cls.ai_config, cls.result_list):
+    #                 post_count += 1
+    #
+    #         log.info("【%s】岗位已投递完毕！已投递岗位数量:%d", keyword, post_count)
+
+    # @classmethod
+    # def safe_text(cls, root: Locator, selector: str) -> str:
+    #     """安全获取单个文本内容"""
+    #     node = root.locator(selector)
+    #     try:
+    #         if node.count() > 0 and node.text_content():
+    #             return node.text_content().strip()
+    #     except Exception:
+    #         pass
+    #     return ""
+
+    # @classmethod
+    # def safe_all_text(cls, root: Locator, selector: str) -> List[str]:
+    #     """安全获取多个文本内容"""
+    #     try:
+    #         return root.locator(selector).all_text_contents()
+    #     except Exception:
+    #         return []
+
+    # @classmethod
+    # def split_boss_name(cls, raw: str) -> tuple[str, str]:
+    #     """拆分Boss姓名和活跃状态"""
+    #     boss_parts = raw.strip().split()
+    #     boss_name = boss_parts[0] if boss_parts else ""
+    #     boss_active = " ".join(boss_parts[1:]) if len(boss_parts) > 1 else ""
+    #     return boss_name, boss_active
+
+    # @classmethod
+    # def split_boss_title(cls, raw: str) -> tuple[str, str]:
+    #     """拆分Boss公司和职位"""
+    #     parts = raw.strip().split(" · ")
+    #     company = parts[0] if parts else ""
+    #     job = parts[1] if len(parts) > 1 else ""
+    #     return company, job
+
+
+
+

@@ -167,6 +167,47 @@ class DatabaseManager:
             print(f"❌ 搜索职位失败: {e}")
             return []
     
+    def search_jobs_by_field_value(self, field: str, value: str) -> List[Dict[str, Any]]:
+        """精准搜索职位信息 - 根据指定字段和值进行精确匹配
+        
+        Args:
+            field: 要搜索的字段名
+            value: 要搜索的值
+            
+        Returns:
+            匹配的职位列表
+        """
+        try:
+            # 验证字段名是否有效，防止SQL注入
+            valid_fields = [
+                'job_name', 'job_desc', 'skills', 'key_word', 'job_salary', 
+                'tag_list', 'boss_name', 'boss_company', 'company_location', 
+                'boss_title', 'boss_active', 'job_detail_url', 'referer'
+            ]
+            
+            if field not in valid_fields:
+                print(f"❌ 无效的字段名: {field}")
+                return []
+            
+            cursor = self.connection.cursor(dictionary=True)
+            
+            if value == "":
+                # 搜索空值
+                query = f"SELECT * FROM jobs WHERE {field} IS NULL OR {field} = '' ORDER BY created_at DESC"
+                cursor.execute(query)
+            else:
+                # 精确匹配非空值
+                query = f"SELECT * FROM jobs WHERE {field} = %s ORDER BY created_at DESC"
+                cursor.execute(query, (value,))
+            
+            results = cursor.fetchall()
+            print(f"✅ 在字段 '{field}' 中搜索值 '{value}'，找到 {len(results)} 个匹配职位")
+            return results
+            
+        except Error as e:
+            print(f"❌ 精准搜索职位失败: {e}")
+            return []
+
     def update_job(self, job_id: int, update_data: Dict[str, Any]) -> bool:
         """更新职位信息"""
         try:

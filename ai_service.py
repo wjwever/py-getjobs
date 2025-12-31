@@ -3,7 +3,14 @@ import os
 from openai import OpenAI
 from logger import log
 from boss_config import AIConfig, load_config_from_yaml
-# import requests
+from dataclasses import dataclass
+
+@dataclass
+class AiFilter:
+    """AI过滤结果数据类"""
+    result: bool
+    message: str = ""
+    ai_response: str = ""
 
 class AIService:
     def __init__(self, ai_config: AIConfig) -> None:
