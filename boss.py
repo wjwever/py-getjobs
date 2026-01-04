@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 import urllib.parse
 from datetime import datetime
@@ -297,9 +298,9 @@ class Boss:
         return results
     #----------------------------------------------------- detail info ----------------------------------------------
     @classmethod
-    def update_job_detail_info(cls):
-        db = DatabaseManager()
-        jobs = db.search_jobs_by_field_value("job_desc", "")
+    def update_job_detail_info(cls, jobs:list[dict[str, Any]]):
+        # db = DatabaseManager()
+        # jobs = db.search_jobs_by_field_value("job_desc", "")
 
         cls.initialize_files()
         cls.load_black_list(cls.BLACK_LIST)
@@ -390,9 +391,30 @@ class Boss:
         # db.add_post_record(job_id, status)
     #----------------------------------------------------- post_jobs ----------------------------------------------
     @classmethod
-    def post_jobs(cls):
+    def post_active_jobs(cls):
         db = DatabaseManager()
         jobs = db.get_active_jobs()
+
+        cls.initialize_files()
+        cls.load_black_list(cls.BLACK_LIST)
+
+        # 初始化配置
+        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+
+        # 使用Playwright获取岗位
+        PlaywrightUtil.init(DeviceType.DESKTOP)
+        cls.start_date = datetime.now()
+
+        # 登录
+        cls.login()
+        page = PlaywrightUtil.get_page_object()
+        for job in jobs:
+            cls.post_job(page, job)
+
+    @classmethod
+    def post_error_status_jobs(cls):
+        db = DatabaseManager()
+        jobs = db.get_error_status_jobs()
 
         cls.initialize_files()
         cls.load_black_list(cls.BLACK_LIST)
@@ -441,20 +463,26 @@ class Boss:
             PlaywrightUtil.sleep(3)  # 页面加载
             detail_page = page
 
+            # job_status = page.locator(".job-status span").inner_text()
+            # logging.info(f"{job['job_detail_url']} : {job_status}")
+            # if job_status and job_status != "招聘中":
+            #     db.add_post_record(job_id, "closed")
+            #     return
+
             # 3. 查找"立即沟通"按钮
             chat_btn = detail_page.locator("a.btn-startchat, a.op-btn-chat")
             found_chat_btn = False
             for _ in range(10):
                 if chat_btn.count() > 0:
                     text_content = chat_btn.first.text_content()
-                    if text_content and "立即沟通" in text_content:
+                    if text_content and ("立即沟通" in text_content):
                         found_chat_btn = True
                         break
                 PlaywrightUtil.sleep(3)
             
             if not found_chat_btn:
                 log.warning("未找到立即沟通按钮，跳过岗位: %d", job_id)
-                db.add_post_record(job_id, "page_error", ai_result)
+                db.add_post_record(job_id, "post_error", ai_result)
                 return
             
             chat_btn.first.click()
@@ -471,7 +499,7 @@ class Boss:
             
             if not input_ready:
                 log.warning("聊天输入框未出现，跳过: %d", job_id)
-                db.add_post_record(job_id, "page_error", ai_result)
+                db.add_post_record(job_id, "post_error", ai_result)
                 return
 
 
@@ -518,11 +546,11 @@ class Boss:
             if send_success:
                 db.add_post_record(job_id, "post_ok", ai_result)
             else:
-                db.add_post_record(job_id, "post_failure", ai_result)
+                db.add_post_record(job_id, "post_error", ai_result)
             return
         except Exception as e:
             log.error(f"post job exception: {e}")
-            db.add_post_record(job_id, "post_failure", ai_result)
+            db.add_post_record(job_id, "post_error", ai_result)
 
     @classmethod
     def find_resume_image(cls) -> Optional[Path]:

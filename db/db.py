@@ -254,20 +254,38 @@ class DatabaseManager:
     # ========== 投递记录表操作 ==========
     
     def add_post_record(self, job_id: int, status: str, ai_result: str = "") -> Optional[int]:
-        """添加投递记录"""
+        """添加投递记录，如果job_id已存在则更新记录"""
         try:
             cursor = self.connection.cursor()
-            insert_query = """
-            INSERT INTO posts (job_id, status, ai_result) VALUES (%s, %s, %s)
-            """
             
-            cursor.execute(insert_query, (job_id, status, ai_result))
-            self.connection.commit()
-            post_id = cursor.lastrowid
-            print(f"✅ 投递记录添加成功！职位ID: {job_id}, 状态: {status}")
+            # 先检查是否已存在该job_id的记录
+            cursor.execute("SELECT id FROM posts WHERE job_id = %s", (job_id,))
+            existing_record = cursor.fetchall()
+            
+            if existing_record:
+                # 如果记录已存在，则更新
+                update_query = """
+                UPDATE posts 
+                SET status = %s, ai_result = %s, updated_at = CURRENT_TIMESTAMP 
+                WHERE job_id = %s
+                """
+                cursor.execute(update_query, (status, ai_result, job_id))
+                self.connection.commit()
+                post_id = existing_record[0]  # 使用已存在的记录ID
+                print(f"✅ 投递记录已更新！职位ID: {job_id}, 状态: {status}")
+            else:
+                # 如果记录不存在，则插入新记录
+                insert_query = """
+                INSERT INTO posts (job_id, status, ai_result) VALUES (%s, %s, %s)
+                """
+                cursor.execute(insert_query, (job_id, status, ai_result))
+                self.connection.commit()
+                post_id = cursor.lastrowid
+                print(f"✅ 投递记录添加成功！职位ID: {job_id}, 状态: {status}")
+            
             return post_id
         except Error as e:
-            print(f"❌ 添加投递记录失败: {e}")
+            print(f"❌ 处理投递记录失败: {e}")
             return None
     
     def get_post_by_id(self, post_id: int) -> Optional[Dict[str, Any]]:
@@ -351,6 +369,24 @@ class DatabaseManager:
             print(f"❌ 获取活跃职位失败: {e}")
             return []
 
+    def get_error_status_jobs(self) -> List[Dict[str, Any]]:
+        """获取活跃职位 - 在posts表中没有记录的职位"""
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT j.* 
+                FROM jobs j 
+                LEFT JOIN posts p ON j.id = p.job_id 
+                WHERE p.status = "closed"
+                ORDER BY j.created_at DESC
+            """)
+            jobs = cursor.fetchall()
+            print(f"✅ 找到 {len(jobs)} 个活跃职位")
+            return jobs
+        except Error as e:
+            print(f"❌ 获取活跃职位失败: {e}")
+            return []
+
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
         try:
@@ -394,6 +430,7 @@ if __name__ == "__main__":
     
     # 创建数据表
     db.create_tables()
+    db.add_post_record(203, "post_error")
     
     # # 示例1: 添加职位信息
     # print("\n=== 添加职位信息 ===")
