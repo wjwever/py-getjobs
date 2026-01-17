@@ -45,7 +45,11 @@ class PlaywrightUtil:
         # 创建浏览器实例
         cls._browser = cls._playwright.chromium.launch(
             headless=False,  # 非无头模式，可视化调试
-            slow_mo=50       # 放慢操作速度，便于调试
+            slow_mo=50,      # 放慢操作速度，便于调试
+            args=[
+                "--disable-blink-features=AutomationControlled", # 减少被检测为机器人的概率
+                "--start-maximized",
+            ],
         )
 
         # 创建桌面浏览器上下文
