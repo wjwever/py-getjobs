@@ -2,13 +2,14 @@
 Playwright工具类，提供浏览器自动化相关的功能
 """
 import json
+import logging
 import random
 import time
 from pathlib import Path
 from enum import Enum
 from typing import Optional
 from playwright.sync_api import Playwright, Browser, BrowserContext, Page, Locator
-from logger import log
+from util.logger import log
 
 
 class DeviceType(Enum):
@@ -46,10 +47,6 @@ class PlaywrightUtil:
         cls._browser = cls._playwright.chromium.launch(
             headless=False,  # 非无头模式，可视化调试
             slow_mo=50,      # 放慢操作速度，便于调试
-            args=[
-                "--disable-blink-features=AutomationControlled", # 减少被检测为机器人的概率
-                "--start-maximized",
-            ],
         )
 
         # 创建桌面浏览器上下文
@@ -58,14 +55,36 @@ class PlaywrightUtil:
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
         )
 
+        # --- 核心注入代码：屏蔽回退和跳转 ---
+        cls._desktop_context.add_init_script("""
+            // 1. 废掉 history 对象的回退功能
+            window.history.back = function() { console.log('检测到回退尝试，已拦截'); };
+            window.history.go = function() { console.log('检测到 history.go，已拦截'); };
+            
+            // 2. 拦截 location 重定向 (通过覆盖原型链或直接冻结)
+            // 注意：完全锁定 location 可能会导致正常功能失效，建议只针对“回退”逻辑
+            const originalBack = window.history.back;
+            
+            // 3. 针对 debugger 的对抗：重写定时器，让频繁的检测失效
+            const originalSetInterval = window.setInterval;
+            window.setInterval = function(fn, delay) {
+                // 如果检测到是短频次的检测（比如 500ms 一次的调试检测），可以加大延迟或跳过
+                if (delay < 1000) return; 
+                return originalSetInterval(fn, delay);
+            };
+            
+            console.log('反爬防御拦截器已就绪');
+        """)
+
         # 创建移动设备浏览器上下文
-        cls._mobile_context = cls._browser.new_context(
-            viewport={"width": 375, "height": 812},
-            device_scale_factor=3.0,
-            is_mobile=True,
-            has_touch=True,
-            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
-        )
+        # cls._mobile_context = cls._browser.new_context(
+        #     viewport={"width": 375, "height": 812},
+        #     device_scale_factor=3.0,
+        #     is_mobile=True,
+        #     has_touch=True,
+        #     user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
+        # )
+        cls._mobile_context = None
 
 
         cls.set_default_device_type(device_type)
@@ -75,8 +94,9 @@ class PlaywrightUtil:
             cls._desktop_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
         else:
             # 创建移动设备页面
-            cls._mobile_page = cls._mobile_context.new_page()
-            cls._mobile_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
+            # cls._mobile_page = cls._mobile_context.new_page()
+            # cls._mobile_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
+            pass
 
         log.info("Playwright及浏览器实例初始化完成")
 

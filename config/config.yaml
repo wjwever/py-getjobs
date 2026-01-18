@@ -51,7 +51,7 @@ ai:
   api_key: "" # 如果为空，则使用环境变量中的 DEEPSEEK_API_KEY
   model: "deepseek-chat"
   url: "https://api.deepseek.com"
-  resume_md: "data/resume.md" # 你的简历文件，目前只支持markdown，AI会参考简历内容进行打招呼语的生成
+  resume_md: "config/resume.md" # 你的简历文件，目前只支持markdown，AI会参考简历内容进行打招呼语的生成
 
 bot:
   is_send: true #开启企业微信消息推送

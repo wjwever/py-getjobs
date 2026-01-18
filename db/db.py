@@ -359,7 +359,7 @@ class DatabaseManager:
                 SELECT j.* 
                 FROM jobs j 
                 LEFT JOIN posts p ON j.id = p.job_id 
-                WHERE p.job_id IS NULL 
+                WHERE p.job_id IS NULL or p.status = '' 
                 ORDER BY j.created_at DESC
             """)
             active_jobs = cursor.fetchall()

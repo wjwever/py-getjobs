@@ -3,9 +3,9 @@ from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from boss_enum import BossEnum
+from boss.boss_enum import BossEnum
 
-from logger import log
+from util.logger import log
 
 
 @dataclass 
@@ -17,7 +17,7 @@ class AIConfig:
     model: str = "deepseek-chat"
     api_key: str = ""
     base_url: str = "https://api.deepseek.com"
-    resume_md: str = "data/resume.md"
+    resume_md: str = "config/resume.md"
     def __str__(self) -> str:
         """字符串表示"""
         return f"AIConfig(model={self.model}, base_url={self.base_url})"
@@ -117,7 +117,7 @@ class BossConfig:
         if json_path:
             json_file = Path(json_path)
         else:
-            json_file = Path("data/city-industry-code.json")
+            json_file = Path("config/city-industry-code.json")
         if not json_file.exists():
             # 尝试其他可能的位置
             json_file = Path("src/main/java/boss/city-industry-code.json")

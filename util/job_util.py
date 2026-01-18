@@ -9,8 +9,8 @@ import threading
 import time
 import schedule
 from concurrent.futures import ThreadPoolExecutor
-from boss_config import BossConfig
-from logger import log
+from boss.boss_config import BossConfig
+from util.logger import log
 from dataclasses import dataclass
 
 @dataclass

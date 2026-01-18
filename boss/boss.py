@@ -1,5 +1,4 @@
 import json
-import logging
 import time
 import urllib.parse
 from datetime import datetime
@@ -8,12 +7,12 @@ from typing import List, Set, Dict, Optional, Any
 
 from playwright.sync_api import Page 
 
-from boss_config import BossConfig, load_config_from_yaml, AIConfig
+from boss.boss_config import BossConfig, load_config_from_yaml, AIConfig
 from db.db import DatabaseManager
-from job_util import Job
-from playwright_util import PlaywrightUtil, DeviceType
-from locators import Locators
-from logger import log
+from util.job_util import Job
+from util.playwright_util import PlaywrightUtil, DeviceType
+from util.locators import Locators
+from util.logger import log
 
 class Boss:
     """Boss直聘自动化主类"""
@@ -21,8 +20,8 @@ class Boss:
     # 常量定义
     HOME_URL = "https://www.zhipin.com"
     BASE_URL = "https://www.zhipin.com/web/geek/job?"
-    BLACK_LIST = "data/blacklist.json"
-    COOKIE_PATH = "data/cookie.json"
+    BLACK_LIST = "config/blacklist.json"
+    COOKIE_PATH = "config/cookie.json"
 
     # 类变量
     black_companies: Set[str] = set()
@@ -190,7 +189,7 @@ class Boss:
         cls.load_black_list(cls.BLACK_LIST)
 
         # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+        cls.config, cls.ai_config = load_config_from_yaml("config/config.yaml")
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)

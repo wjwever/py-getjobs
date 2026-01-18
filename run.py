@@ -1,6 +1,7 @@
-from boss import Boss
-from logger import log
+from boss.boss import Boss
+from util.logger import log
 from db.db import DatabaseManager
+
 if __name__ == "__main__":
     db = DatabaseManager()
     db.create_tables()
