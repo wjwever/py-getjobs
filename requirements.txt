@@ -2,3 +2,4 @@ openai==2.8.1
 playwright==1.56.0
 PyYAML==6.0.3
 schedule==1.2.2
+pymysql

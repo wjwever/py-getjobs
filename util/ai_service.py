@@ -2,7 +2,7 @@
 import os
 from openai import OpenAI
 from logger import log
-from boss_config import AIConfig, load_config_from_yaml
+from boss.boss_config import AIConfig, load_config_from_yaml
 from dataclasses import dataclass
 
 @dataclass
@@ -77,6 +77,6 @@ if __name__ == "__main__":
 4. 了解WebSocket、SSE等技术，有实时应用开发经验者优先。
 5. 对用户体验和交互设计有深刻理解，对技术有激情，乐于探索和学习新技术。
 '''
-    _, ai_config = load_config_from_yaml("data/config.yaml")
+    _, ai_config = load_config_from_yaml("config/config.yaml")
     bot = AIService(ai_config)
     bot.chat(job_desc)

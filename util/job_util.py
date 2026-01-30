@@ -60,7 +60,7 @@ class JobUtils:
             配置类实例
         """
         try:
-            config_file = Path("boss/config.yaml")
+            config_file = Path("config/config.yaml")
             if not config_file.exists():
                 raise FileNotFoundError("无法找到 config.yaml 文件")
             

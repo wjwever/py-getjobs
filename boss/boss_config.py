@@ -306,7 +306,7 @@ class BossConfig:
 
 
 # 工具函数
-def load_config_from_yaml(file_path: str = "boss/config.yaml") -> BossConfig:
+def load_config_from_yaml(file_path: str = "boss/config.yaml") -> tuple[BossConfig, AIConfig]:
     """
     从YAML文件加载配置
     :param file_path: 配置文件路径
@@ -409,7 +409,7 @@ if __name__ == "__main__":
     log.info(f"学历代码: {config.degree}")
     log.info(f"从dict加载的配置:{config.to_dict()}")
 
-    boss_config, ai_config = load_config_from_yaml("data/config.yaml")
+    boss_config, ai_config = load_config_from_yaml("config/config.yaml")
     log.info("从YAML文件加载的配置: %s", boss_config)
     log.info(f"enable_ai {boss_config.enable_ai}")
     log.info("AI配置: %s", ai_config)

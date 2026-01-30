@@ -45,8 +45,13 @@ class PlaywrightUtil:
 
         # 创建浏览器实例
         cls._browser = cls._playwright.chromium.launch(
-            headless=False,  # 非无头模式，可视化调试
+            args =[
+                "--disable-blink-features=AutomationControlled", # 减少被检测为机器人的概率
+                "--start-maximized",
+            ],
+            headless=True,  # 非无头模式，可视化调试
             slow_mo=50,      # 放慢操作速度，便于调试
+
         )
 
         # 创建桌面浏览器上下文
@@ -77,14 +82,13 @@ class PlaywrightUtil:
         """)
 
         # 创建移动设备浏览器上下文
-        # cls._mobile_context = cls._browser.new_context(
-        #     viewport={"width": 375, "height": 812},
-        #     device_scale_factor=3.0,
-        #     is_mobile=True,
-        #     has_touch=True,
-        #     user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
-        # )
-        cls._mobile_context = None
+        cls._mobile_context = cls._browser.new_context(
+            viewport={"width": 375, "height": 812},
+            device_scale_factor=3.0,
+            is_mobile=True,
+            has_touch=True,
+            user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1"
+        )
 
 
         cls.set_default_device_type(device_type)
@@ -94,9 +98,8 @@ class PlaywrightUtil:
             cls._desktop_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
         else:
             # 创建移动设备页面
-            # cls._mobile_page = cls._mobile_context.new_page()
-            # cls._mobile_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
-            pass
+            cls._mobile_page = cls._mobile_context.new_page()
+            cls._mobile_page.set_default_timeout(cls.DEFAULT_TIMEOUT)
 
         log.info("Playwright及浏览器实例初始化完成")
 
@@ -107,7 +110,7 @@ class PlaywrightUtil:
         log.info(f"已设置默认设备类型为: {device_type}")
 
     @classmethod
-    def _get_page(cls, device_type: DeviceType = None) -> Page:
+    def _get_page(cls, device_type: Optional[DeviceType] = None) -> Page:
         """获取当前页面（基于当前设备类型）"""
         if device_type is None:
             device_type = cls._default_device_type
@@ -115,7 +118,7 @@ class PlaywrightUtil:
         return cls._desktop_page if device_type == DeviceType.DESKTOP else cls._mobile_page
 
     @classmethod
-    def _get_context(cls, device_type: DeviceType = None) -> BrowserContext:
+    def _get_context(cls, device_type: Optional[DeviceType] = None) -> BrowserContext:
         """获取当前上下文（基于当前设备类型）"""
         if device_type is None:
             device_type = cls._default_device_type
@@ -141,7 +144,7 @@ class PlaywrightUtil:
         log.info("Playwright及浏览器实例已关闭")
 
     @classmethod
-    def navigate(cls, url: str, device_type: DeviceType = None):
+    def navigate(cls, url: str, device_type: Optional[DeviceType] = None):
         """导航到指定URL"""
         if device_type is None:
             device_type = cls._default_device_type
@@ -176,7 +179,7 @@ class PlaywrightUtil:
         cls.sleep_millis(milli_seconds)
 
     @classmethod
-    def find_element(cls, selector: str, device_type: DeviceType = None) -> Locator:
+    def find_element(cls, selector: str, device_type: Optional[DeviceType] = None) -> Locator:
         """查找元素"""
         return cls._get_page(device_type).locator(selector)
 
