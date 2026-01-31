@@ -49,7 +49,7 @@ class PlaywrightUtil:
                 "--disable-blink-features=AutomationControlled", # 减少被检测为机器人的概率
                 "--start-maximized",
             ],
-            headless=True,  # 非无头模式，可视化调试
+            headless=False,  # 非无头模式，可视化调试
             slow_mo=50,      # 放慢操作速度，便于调试
 
         )

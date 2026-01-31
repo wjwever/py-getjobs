@@ -2,6 +2,7 @@ from typing import Collection, List, Dict, Any, Optional
 import pymysql
 from pymysql import Error
 from util.logger import logger
+from util.config import config, init_config
 
 class DatabaseManager:
     """数据库管理器 - 简洁易用的数据库操作类"""
@@ -20,11 +21,12 @@ class DatabaseManager:
     def connect(self):
         """连接数据库"""
         try:
+            cfg = init_config()
             self.connection = pymysql.connect(
-                host='localhost',
-                user='root',
-                password='root',
-                database='py_getjobs',
+                host=cfg._db.host if cfg._db else "localhost",
+                user=cfg._db.user if cfg._db else "root",
+                password=cfg._db.password if cfg._db else "root",
+                database=cfg._db.database if cfg._db else "py_getjobs",
                 charset='utf8mb4',
                 cursorclass=pymysql.cursors.DictCursor
             )
@@ -239,13 +241,13 @@ class DatabaseManager:
             logger.error(f"更新职位失败: {e}")
             return False
     
-    def delete_job(self, job_id: int) -> bool:
+    def delete_job(self, job_id: int, reason:Optional[str] = None) -> bool:
         """删除职位信息"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
                 self.connection.commit()
-                logger.info(f"职位ID {job_id} 删除成功！")
+                logger.info(f"职位ID {job_id} {reason} 删除成功！")
                 return True
         except Error as e:
             logger.error(f"删除职位失败: {e}")
@@ -358,7 +360,7 @@ class DatabaseManager:
                     SELECT j.* 
                     FROM jobs j 
                     LEFT JOIN posts p ON j.id = p.job_id 
-                    WHERE p.job_id IS NULL or p.status = '' 
+                    WHERE p.job_id IS NULL or p.status != 'post_ok' 
                     ORDER BY j.created_at DESC
                 """)
                 active_jobs = cursor.fetchall()

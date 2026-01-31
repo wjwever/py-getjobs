@@ -5,15 +5,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Set, Dict, Optional, Any 
 
-from playwright.sync_api import Page 
-
 from boss.boss_config import BossConfig, load_config_from_yaml, AIConfig
 from db.db import DatabaseManager
+from util import logger
 from util.job_util import Job
 from util.playwright_util import PlaywrightUtil, DeviceType
 from util.locators import Locators
 from util.logger import log
 from util.job_util import JobUtils  # 需要创建这个工具类
+from util.config import config, init_config
 
 class Boss:
     """Boss直聘自动化主类"""
@@ -29,7 +29,7 @@ class Boss:
     black_recruiters: Set[str] = set()
     black_jobs: Set[str] = set()
     result_list: List[Job] = []
-    start_date: Optional[datetime] = None
+    # start_date: Optional[datetime] = None
     config: BossConfig
     ai_config: AIConfig
 
@@ -59,7 +59,7 @@ class Boss:
             cls.scan_login()
 
     @classmethod
-    def wait_for_slider_verify(cls, page: Page):
+    def wait_for_slider_verify(cls, page):
         """等待滑块验证完成"""
         SLIDER_URL = "https://www.zhipin.com/web/user/safe/verify-slider"
 
@@ -190,25 +190,31 @@ class Boss:
         cls.load_black_list(cls.BLACK_LIST)
 
         # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("config/config.yaml")
+        # cls.config, cls.ai_config = load_config_from_yaml()
+        cfg = init_config()
+        # if cfg._boss and cfg._ai:
+        #     cls.config = cfg._boss
+        #     cls.ai_config = cfg._ai
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)
-        cls.start_date = datetime.now()
+        # cls.start_date = datetime.now()
 
         # 登录
         cls.login()
 
         # 按城市投递
-        for city_code in cls.config.city_code:
+        # for city_code in cls.config.city_code:
+        for city_code in cfg._boss.city_code:
             cls.get_all_jobs_by_city(city_code)
 
     @classmethod
     def get_all_jobs_by_city(cls, city_code: str):
         """按城市投递职位"""
         search_url = cls.get_search_url(city_code)
+        cfg = init_config()
 
-        for keyword in cls.config.keywords:
+        for keyword in cfg._boss.keywords:
             encoded_keyword = urllib.parse.quote(keyword)
 
             url = search_url + "&query=" + encoded_keyword
@@ -294,7 +300,7 @@ class Boss:
             # print(f"成功提取: {job_name} | {job_salary}")
 
         # 打印最终结果
-        print(f"\n共抓取到 {len(results)} 条数据")
+        log.info(f"共抓取到 {len(results)} 条数据")
         return results
     #----------------------------------------------------- detail info ----------------------------------------------
     @classmethod
@@ -306,11 +312,11 @@ class Boss:
         cls.load_black_list(cls.BLACK_LIST)
 
         # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+        # cls.config, cls.ai_config = load_config_from_yaml()
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)
-        cls.start_date = datetime.now()
+        # cls.start_date = datetime.now()
 
         # 登录
         cls.login()
@@ -320,6 +326,7 @@ class Boss:
 
     @classmethod
     def fill_in_detail_info(cls, page, job:dict[str, Any]):
+        cfg = init_config()
         db = DatabaseManager()
         job_id = job['id']
         job_name = job["job_name"]
@@ -359,7 +366,17 @@ class Boss:
             active_time = ""
 
         try:
-            skills = section.locator('ul.job-keyword-list li').all_text_contents()
+            # skills = section.locator('ul.job-keyword-list li').all_text_contents()
+            # 使用 evaluate 运行一段 JS，只返回 li 内部的直接文本，忽略子元素
+            skills = section.locator('ul.job-keyword-list li').evaluate_all("""
+                elements => elements.map(li => {
+                    // 克隆节点以免影响页面，然后移除所有 span
+                    const clone = li.cloneNode(true);
+                    const spans = clone.querySelectorAll('span');
+                    spans.forEach(span => span.remove());
+                    return clone.innerText.trim();
+                })
+            """)
         except:
             skills = ""
 
@@ -383,7 +400,7 @@ class Boss:
         elif any(black_recruiter in boss_title for black_recruiter in cls.black_recruiters):
             db.add_post_record(job_id, "black_recruiter")
 
-        elif any(dead_status in active_time for dead_status in cls.config.dead_status):
+        elif any(dead_status in active_time for dead_status in cfg._boss.dead_status):
             db.add_post_record(job_id, "boss is not active", "")
 
         # 投递简历
@@ -399,11 +416,11 @@ class Boss:
         cls.load_black_list(cls.BLACK_LIST)
 
         # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+        # cls.config, cls.ai_config = load_config_from_yaml()
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)
-        cls.start_date = datetime.now()
+        # cls.start_date = datetime.now()
 
         # 登录
         cls.login()
@@ -420,7 +437,7 @@ class Boss:
         cls.load_black_list(cls.BLACK_LIST)
 
         # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+        # cls.config, cls.ai_config = load_config_from_yaml()
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)
@@ -433,19 +450,38 @@ class Boss:
             cls.post_job(page, job)
 
     @classmethod
+    def handle_boss_dialog(cls, page):
+        return
+        # 1. 定位“好”这个按钮
+        # 这里的选择器使用了具体的 class 和文本内容，确保精准
+        log.info(f"检查限制弹窗")
+        btn_sure = page.locator("div.dialog-footer .btn-sure", has_text="好")
+
+        try:
+            # 2. 检查按钮是否可见，如果可见则点击
+            # 设置 timeout 为 2000ms（2秒），避免没弹窗时程序卡死太久
+            if btn_sure.is_visible(timeout=1000):
+                btn_sure.click()
+                log.info("检测到沟通限制弹窗，已点击“好”")
+        except Exception as e:
+            # 如果没有出现弹窗，会进入这里，直接忽略即可
+            pass
+             
+    @classmethod
     def post_job(cls, page, job:dict[str, Any]):
+        cfg = init_config()
         job_id = job["id"]
         if not job["job_desc"]:
             log.error(f"jobid:{job_id} empty job desc")
             return
 
         db = DatabaseManager()
-        say_hi = cls.config.say_hi.replace("[\r\n]", "")
+        say_hi = cfg._boss.say_hi.replace("[\r\n]", "")
         match:bool = True
         ai_result:str = ""
-        if cls.config.enable_ai:
+        if cfg._ai.enable_ai:
             try:
-                from ai_service import AIService
+                from util.ai_service import AIService
                 bot = AIService(cls.ai_config)
                 ai_result = bot.chat(job['job_desc'])
                 obj = json.loads(ai_result)
@@ -463,6 +499,8 @@ class Boss:
             PlaywrightUtil.sleep(3)  # 页面加载
             detail_page = page
 
+            cls.handle_boss_dialog(detail_page)
+
             # job_status = page.locator(".job-status span").inner_text()
             # logging.info(f"{job['job_detail_url']} : {job_status}")
             # if job_status and job_status != "招聘中":
@@ -472,17 +510,25 @@ class Boss:
             # 3. 查找"立即沟通"按钮
             chat_btn = detail_page.locator("a.btn-startchat, a.op-btn-chat")
             found_chat_btn = False
+            posted = False
             for _ in range(10):
                 if chat_btn.count() > 0:
                     text_content = chat_btn.first.text_content()
+                    if text_content and ("继续沟通" in text_content):
+                        found_chat_btn = False
+                        posted = True
+                        break
                     if text_content and ("立即沟通" in text_content):
                         found_chat_btn = True
                         break
                 PlaywrightUtil.sleep(3)
             
             if not found_chat_btn:
-                log.warning("未找到立即沟通按钮，跳过岗位: %d", job_id)
-                db.add_post_record(job_id, "post_error", ai_result)
+                if not posted:
+                    log.warning("未找到立即沟通按钮，跳过岗位: %d", job_id)
+                    db.add_post_record(job_id, "post_error", ai_result)
+                else:
+                    db.add_post_record(job_id, "post_ok")
                 return
             
             chat_btn.first.click()
@@ -499,7 +545,7 @@ class Boss:
             
             if not input_ready:
                 log.warning("聊天输入框未出现，跳过: %d", job_id)
-                db.add_post_record(job_id, "post_error", ai_result)
+                # db.add_post_record(job_id, "post_error", ai_result)
                 return
 
 
@@ -516,7 +562,8 @@ class Boss:
                 input_element.evaluate("(el, msg) => el.innerText = msg", message)
 
             img_resume = False
-            if cls.config.send_img_resume:
+            cfg = init_config()
+            if cfg._boss.send_img_resume:
                 try:
                     # 查找图片简历文件
                     resume_path = cls.find_resume_image()
@@ -546,11 +593,13 @@ class Boss:
             if send_success:
                 db.add_post_record(job_id, "post_ok", ai_result)
             else:
-                db.add_post_record(job_id, "post_error", ai_result)
+                # db.add_post_record(job_id, "post_error", ai_result)
+                pass
             return
         except Exception as e:
             log.error(f"post job exception: {e}")
-            db.add_post_record(job_id, "post_error", ai_result)
+            # db.add_post_record(job_id, "post_error", ai_result)
+            pass
 
     @classmethod
     def find_resume_image(cls) -> Optional[Path]:
@@ -682,16 +731,17 @@ class Boss:
     @classmethod
     def get_search_url(cls, city_code: str) -> str:
         """构建搜索URL"""
+        cfg = init_config()
 
         return (cls.BASE_URL + 
             JobUtils.append_param("city", city_code) +
-            JobUtils.append_param("jobType", cls.config.job_type) +
-            JobUtils.append_param("salary", cls.config.salary) +
-            JobUtils.append_list_param("experience", cls.config.experience) +
-            JobUtils.append_list_param("degree", cls.config.degree) +
-            JobUtils.append_list_param("scale", cls.config.scale) +
-            JobUtils.append_list_param("industry", cls.config.industry) +
-            JobUtils.append_list_param("stage", cls.config.stage))
+            JobUtils.append_param("jobType", cfg._boss.job_type) +
+            JobUtils.append_param("salary", cfg._boss.salary) +
+            JobUtils.append_list_param("experience", cfg._boss.experience) +
+            JobUtils.append_list_param("degree", cfg._boss.degree) +
+            JobUtils.append_list_param("scale", cfg._boss.scale) +
+            JobUtils.append_list_param("industry", cfg._boss.industry) +
+            JobUtils.append_list_param("stage", cfg._boss.stage))
 
     @classmethod
     def load_black_list(cls, path: str):
