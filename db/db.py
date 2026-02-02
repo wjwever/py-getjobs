@@ -2,6 +2,7 @@ from typing import Collection, List, Dict, Any, Optional
 import pymysql
 from pymysql import Error
 from util.logger import logger
+from boss.boss_config import load_mysql_config
 
 class DatabaseManager:
     """数据库管理器 - 简洁易用的数据库操作类"""
@@ -16,21 +17,51 @@ class DatabaseManager:
             cls._instance.connection = None
             cls._instance.connect()
         return cls._instance
-    
+
     def connect(self):
-        """连接数据库"""
+        """连接数据库，如果不存在则创建数据库和表"""
+        config = load_mysql_config()
+
         try:
-            self.connection = pymysql.connect(
-                host='localhost',
-                user='root',
-                password='root',
-                database='py_getjobs',
+            # 先尝试连接到MySQL服务器（不指定数据库）
+            temp_conn = pymysql.connect(
+                host=config.host,
+                user=config.user,
+                password=config.password,
                 charset='utf8mb4',
                 cursorclass=pymysql.cursors.DictCursor
             )
+
+            cursor = temp_conn.cursor()
+
+            # 1. 检查并创建数据库
+            cursor.execute("SHOW DATABASES LIKE 'py_getjobs'")
+            if not cursor.fetchone():
+                logger.info("数据库 'py_getjobs' 不存在，正在创建...")
+                cursor.execute("CREATE DATABASE py_getjobs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                logger.info("数据库 'py_getjobs' 创建成功！")
+
+            cursor.close()
+            temp_conn.close()
+
+            # 2. 连接到具体数据库
+            self.connection = pymysql.connect(
+                host=config.host,
+                user=config.user,
+                password=config.password,
+                database=config.database,
+                charset='utf8mb4',
+                cursorclass=pymysql.cursors.DictCursor
+            )
+
+            # 3. 检查并创建表
+            # self._create_tables_if_not_exist()
+
             logger.info("数据库连接成功！")
+
         except Error as e:
             logger.error(f"连接失败: {e}")
+            raise
     
     def create_tables(self):
         """创建数据表"""

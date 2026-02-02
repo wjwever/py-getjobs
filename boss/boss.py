@@ -7,7 +7,8 @@ from typing import List, Set, Dict, Optional, Any
 
 from playwright.sync_api import Page 
 
-from boss.boss_config import BossConfig, load_config_from_yaml, AIConfig
+from boss.boss_config import BossConfig, load_boss_config
+from boss.boss_config import AIConfig, load_ai_config
 from db.db import DatabaseManager
 from util.job_util import Job
 from util.playwright_util import PlaywrightUtil, DeviceType
@@ -70,7 +71,7 @@ class Boss:
         while True:
             current_url = page.url
             if current_url and current_url.startswith(SLIDER_URL):
-                print("\n【滑块验证】请手动完成Boss直聘滑块验证，通过后在控制台回车继续…")
+                log.info("\n【滑块验证】请手动完成Boss直聘滑块验证，通过后在控制台回车继续…")
                 try:
                     # 等待用户输入回车
                     input("请完成滑块验证后按回车键继续...")
@@ -190,7 +191,7 @@ class Boss:
         cls.load_black_list(cls.BLACK_LIST)
 
         # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("config/config.yaml")
+        cls.config, cls.ai_config = load_boss_config(), load_ai_config()
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)
@@ -292,9 +293,10 @@ class Boss:
             }
             results |= item
             # print(f"成功提取: {job_name} | {job_salary}")
-
+            # log.info(f"成功提取: {job_name} | {job_salary}")
+        
         # 打印最终结果
-        print(f"\n共抓取到 {len(results)} 条数据")
+        log.info(f"\n共抓取到 {len(results)} 条数据")
         return results
     #----------------------------------------------------- detail info ----------------------------------------------
     @classmethod
@@ -306,7 +308,7 @@ class Boss:
         cls.load_black_list(cls.BLACK_LIST)
 
         # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+        cls.config, cls.ai_config = load_boss_config(), load_ai_config()
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)
@@ -398,8 +400,7 @@ class Boss:
         cls.initialize_files()
         cls.load_black_list(cls.BLACK_LIST)
 
-        # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+        cls.config, cls.ai_config = load_boss_config(), load_ai_config()
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)
@@ -419,8 +420,7 @@ class Boss:
         cls.initialize_files()
         cls.load_black_list(cls.BLACK_LIST)
 
-        # 初始化配置
-        cls.config, cls.ai_config = load_config_from_yaml("data/config.yaml")
+        cls.config, cls.ai_config = load_boss_config(), load_ai_config()        
 
         # 使用Playwright获取岗位
         PlaywrightUtil.init(DeviceType.DESKTOP)

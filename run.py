@@ -5,6 +5,8 @@ from db.db import DatabaseManager
 if __name__ == "__main__":
     db = DatabaseManager()
     db.create_tables()
+
+    # 100只是为了重试
     for _ in range(100):
         try:
             Boss.new_jobs()

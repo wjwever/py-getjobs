@@ -6,13 +6,16 @@ from pathlib import Path
 from boss.boss_enum import BossEnum
 
 from util.logger import log
+import functools
+import os
 
 
-@dataclass 
+@dataclass
 class AIConfig:
     """
     AI配置类
     """
+    enableAI: bool = False
     prompt_template: str = ""
     model: str = "deepseek-chat"
     api_key: str = ""
@@ -20,7 +23,28 @@ class AIConfig:
     resume_md: str = "config/resume.md"
     def __str__(self) -> str:
         """字符串表示"""
-        return f"AIConfig(model={self.model}, base_url={self.base_url})"
+        return f"AIConfig(enableAI={self.enableAI}, model={self.model}, base_url={self.base_url})"
+
+
+@dataclass
+class MySQLConfig:
+    """
+    MySQL配置类
+    """
+    host: str = "localhost"
+    port: int = 3306
+    user: str = "root"
+    password: str = ""
+    database: str = "py_getjobs"
+    charset: str = "utf8mb4"
+    
+    def __str__(self) -> str:
+        """字符串表示"""
+        return f"MySQLConfig(host={self.host}, database={self.database})"
+    
+    def get_connection_string(self) -> str:
+        """获取数据库连接字符串"""
+        return f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}?charset={self.charset}"
 
 
 @dataclass
@@ -305,10 +329,10 @@ class BossConfig:
                f"job_type={self.job_type}, salary={self.salary})"
 
 
-# 工具函数
-def load_config_from_yaml(file_path: str = "boss/config.yaml") -> tuple[BossConfig, AIConfig]:
+@functools.lru_cache(maxsize=1)
+def load_boss_config(file_path: str = "config/config.yaml") -> BossConfig:
     """
-    从YAML文件加载配置
+    加载Boss配置（带缓存）
     :param file_path: 配置文件路径
     :return: BossConfig对象
     """
@@ -329,8 +353,40 @@ def load_config_from_yaml(file_path: str = "boss/config.yaml") -> tuple[BossConf
         with open(config_file, 'r', encoding='utf-8') as f:
             config_dict = yaml.safe_load(f)
         
-        log.info(f"成功加载YAML配置文件: {config_dict['boss']}")
+        log.info(f"成功加载Boss配置: {config_dict['boss']}")
         config = BossConfig.from_dict(config_dict["boss"])
+        return config.init()
+        
+    except Exception as e:
+        log.error(f"加载Boss配置失败: {e}")
+        # 返回默认配置
+        default_config = BossConfig()
+        return default_config.init()
+
+@functools.lru_cache(maxsize=1)
+def load_ai_config(file_path: str = "config/config.yaml") -> AIConfig:
+    """
+    加载AI配置（带缓存）
+    :param file_path: 配置文件路径
+    :return: AIConfig对象
+    """
+    try:
+        import yaml
+    except ImportError:
+        log.error("缺少yaml模块，请安装 pyyaml 包以支持YAML配置文件")
+        raise
+    
+    try:
+        config_file = Path(file_path)
+        if not config_file.exists():
+            log.error(f"配置文件不存在: {file_path}")
+            # 返回默认AI配置
+            return AIConfig()
+        
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config_dict = yaml.safe_load(f)
+        
+        log.info(f"成功加载AI配置")
         ai_config = AIConfig(
             prompt_template=config_dict["ai"].get("prompt", ""),
             model=config_dict["ai"].get("model", "deepseek-chat"),
@@ -338,40 +394,52 @@ def load_config_from_yaml(file_path: str = "boss/config.yaml") -> tuple[BossConf
             base_url=config_dict["ai"].get("url", "https://api.deepseek.com"),
             resume_md=config_dict["ai"].get("resume_md", "data/resume.md")
         )
-        return config.init(), ai_config
+        return ai_config
         
     except Exception as e:
-        log.error(f"加载配置文件失败: {e}")
-        # 返回默认配置
-        default_config = BossConfig()
-        return default_config.init()
+        log.error(f"加载AI配置失败: {e}")
+        # 返回默认AI配置
+        return AIConfig()
 
-# def load_config_from_file(file_path: str = "boss/config.json") -> BossConfig:
-#     """
-#     从JSON文件加载配置
-#     :param file_path: 配置文件路径
-#     :return: BossConfig对象
-#     """
-#     try:
-#         config_file = Path(file_path)
-#         if not config_file.exists():
-#             log.error(f"配置文件不存在: {file_path}")
-#             # 创建默认配置
-#             default_config = BossConfig()
-#             return default_config.init()
-        
-#         with open(config_file, 'r', encoding='utf-8') as f:
-#             config_dict = json.load(f)
-        
-#         config = BossConfig.from_dict(config_dict)
-#         return config.init()
-        
-#     except Exception as e:
-#         log.error(f"加载配置文件失败: {e}")
-#         # 返回默认配置
-#         default_config = BossConfig()
-#         return default_config.init()
 
+@functools.lru_cache(maxsize=1)
+def load_mysql_config(file_path: str = "config/config.yaml") -> MySQLConfig:
+    """
+    加载MySQL配置（带缓存）
+    :param file_path: 配置文件路径
+    :return: MySQLConfig对象
+    """
+    try:
+        import yaml
+    except ImportError:
+        log.error("缺少yaml模块，请安装 pyyaml 包以支持YAML配置文件")
+        raise
+    
+    try:
+        config_file = Path(file_path)
+        if not config_file.exists():
+            log.error(f"配置文件不存在: {file_path}")
+            # 返回默认MySQL配置
+            return MySQLConfig()
+        
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config_dict = yaml.safe_load(f)
+        
+        mysql_section = config_dict.get("mysql", {})
+        log.info(f"成功加载MySQL配置")
+        mysql_config = MySQLConfig(
+            host=mysql_section.get("host", "localhost"),
+            port=mysql_section.get("port", 3306),
+            user=mysql_section.get("user", "root"),
+            password=mysql_section.get("password", ""),
+            database=mysql_section.get("database", "py_getjobs"),
+            charset=mysql_section.get("charset", "utf8mb4")
+        )
+        return mysql_config
+        
+    except Exception as e:
+        log.error(f"加载MySQL配置失败: {e}")
+        raise
 
 # 使用示例
 if __name__ == "__main__":
@@ -409,7 +477,7 @@ if __name__ == "__main__":
     log.info(f"学历代码: {config.degree}")
     log.info(f"从dict加载的配置:{config.to_dict()}")
 
-    boss_config, ai_config = load_config_from_yaml("config/config.yaml")
+    boss_config, ai_config = load_boss_config(), load_ai_config()
     log.info("从YAML文件加载的配置: %s", boss_config)
     log.info(f"enable_ai {boss_config.enable_ai}")
     log.info("AI配置: %s", ai_config)
