@@ -27,7 +27,7 @@ if __name__ == "__main__":
     db = DatabaseManager()
     db.create_tables()
 
-    #find_new_jobs()
+    find_new_jobs()
 
     fill_job_infos()
 
