@@ -71,7 +71,8 @@ class Boss:
         while True:
             current_url = page.url
             if current_url and current_url.startswith(SLIDER_URL):
-                log.info("\n【滑块验证】请手动完成Boss直聘滑块验证，通过后在控制台回车继续…")
+                log.info(f"当前URL: {current_url}")
+                log.info("【滑块验证】请手动完成Boss直聘滑块验证，通过后在控制台回车继续…")
                 try:
                     # 等待用户输入回车
                     input("请完成滑块验证后按回车键继续...")
@@ -296,7 +297,7 @@ class Boss:
             # log.info(f"成功提取: {job_name} | {job_salary}")
         
         # 打印最终结果
-        log.info(f"\n共抓取到 {len(results)} 条数据")
+        log.info(f"共抓取到 {len(results)} 条数据")
         return results
     #----------------------------------------------------- detail info ----------------------------------------------
     @classmethod
@@ -334,7 +335,7 @@ class Boss:
         section = page.locator(".job-detail-section")
         
         if section.count() == 0:
-            db.delete_job(job_id=job_id)
+            #db.delete_job(job_id=job_id)
             return
 
         section = section.first
@@ -443,9 +444,9 @@ class Boss:
         say_hi = cls.config.say_hi.replace("[\r\n]", "")
         match:bool = True
         ai_result:str = ""
-        if cls.config.enable_ai:
+        if cls.ai_config.enableAI:
             try:
-                from ai_service import AIService
+                from util.ai_service import AIService
                 bot = AIService(cls.ai_config)
                 ai_result = bot.chat(job['job_desc'])
                 obj = json.loads(ai_result)
@@ -477,6 +478,9 @@ class Boss:
                     text_content = chat_btn.first.text_content()
                     if text_content and ("立即沟通" in text_content):
                         found_chat_btn = True
+                        break
+                    if text_content and ("继续沟通" in text_content):
+                        found_chat_btn = False
                         break
                 PlaywrightUtil.sleep(3)
             

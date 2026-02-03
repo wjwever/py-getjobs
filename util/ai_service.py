@@ -1,7 +1,7 @@
 # Please install OpenAI SDK first: `pip3 install openai`
 import os
 from openai import OpenAI
-from logger import log
+from util.logger import log
 from boss.boss_config import AIConfig, load_ai_config
 from dataclasses import dataclass
 

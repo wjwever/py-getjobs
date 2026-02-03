@@ -376,30 +376,34 @@ def load_ai_config(file_path: str = "config/config.yaml") -> AIConfig:
         log.error("缺少yaml模块，请安装 pyyaml 包以支持YAML配置文件")
         raise
     
-    try:
-        config_file = Path(file_path)
-        if not config_file.exists():
-            log.error(f"配置文件不存在: {file_path}")
-            # 返回默认AI配置
-            return AIConfig()
-        
-        with open(config_file, 'r', encoding='utf-8') as f:
-            config_dict = yaml.safe_load(f)
-        
-        log.info(f"成功加载AI配置")
-        ai_config = AIConfig(
-            prompt_template=config_dict["ai"].get("prompt", ""),
-            model=config_dict["ai"].get("model", "deepseek-chat"),
-            api_key=config_dict["ai"].get("api_key", ""),
-            base_url=config_dict["ai"].get("url", "https://api.deepseek.com"),
-            resume_md=config_dict["ai"].get("resume_md", "data/resume.md")
-        )
-        return ai_config
-        
-    except Exception as e:
-        log.error(f"加载AI配置失败: {e}")
+    config_file = Path(file_path)
+    if not config_file.exists():
+        log.error(f"配置文件不存在: {file_path}")
         # 返回默认AI配置
         return AIConfig()
+    
+    with open(config_file, 'r', encoding='utf-8') as f:
+        config_dict = yaml.safe_load(f)
+    
+    ai_config = AIConfig(
+        enableAI=config_dict["ai"].get("enableAI", False),
+        prompt_template=config_dict["ai"].get("prompt", ""),
+        model=config_dict["ai"].get("model", "deepseek-chat"),
+        api_key=config_dict["ai"].get("api_key", ""),
+        base_url=config_dict["ai"].get("url", "https://api.deepseek.com"),
+        resume_md=config_dict["ai"].get("resume_md", "data/resume.md")
+    )
+
+    # 检查API密钥是否为空
+    if ai_config.enableAI and not ai_config.api_key:
+        ai_config.api_key = os.getenv("DEEPSEEK_API_KEY", ai_config.api_key)
+        if not ai_config.api_key:
+            log.error("未配置Deepseek API密钥，请设置DEEPSEEK_API_KEY环境变量")
+            raise
+    
+    log.info(f"成功加载AI配置{ai_config}")
+    return ai_config
+        
 
 
 @functools.lru_cache(maxsize=1)

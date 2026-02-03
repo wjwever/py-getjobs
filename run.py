@@ -2,10 +2,8 @@ from boss.boss import Boss
 from util.logger import log
 from db.db import DatabaseManager
 
-if __name__ == "__main__":
-    db = DatabaseManager()
-    db.create_tables()
 
+def find_new_jobs():
     # 100只是为了重试
     for _ in range(100):
         try:
@@ -14,6 +12,7 @@ if __name__ == "__main__":
         except Exception as e:
             log.info(f"{e} retry")
 
+def fill_job_infos():
     for _ in range(100):
         try:
             jobs = db.search_jobs_by_field_value("job_desc", "")
@@ -23,8 +22,13 @@ if __name__ == "__main__":
         except Exception as e:
             log.info(f"{e} retry")
 
+
+if __name__ == "__main__":
+    db = DatabaseManager()
+    db.create_tables()
+
+    #find_new_jobs()
+
+    fill_job_infos()
+
     Boss.post_active_jobs()
-    # Boss.post_error_status_jobs()
-    # Boss.save_black_list()
-
-
