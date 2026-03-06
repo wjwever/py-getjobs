@@ -31,8 +31,12 @@ ai:
   resume_md: "config/resume.md" # 你的简历文件，目前只支持markdown，AI会参考简历内容进行打招呼语的生成
 
 mysql:
+  enable: false # 是否使用MySQL，false则使用SQLite
   host: "localhost"
   port: 3306
   user: "root"
   password: "root"
   database: "py_getjobs"
+
+sqlite:
+  path: "data/py_getjobs.db" # SQLite数据库文件路径

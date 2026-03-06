@@ -31,20 +31,33 @@ class MySQLConfig:
     """
     MySQL配置类
     """
+    enable: bool = True
     host: str = "localhost"
     port: int = 3306
     user: str = "root"
     password: str = ""
     database: str = "py_getjobs"
     charset: str = "utf8mb4"
-    
+
     def __str__(self) -> str:
         """字符串表示"""
-        return f"MySQLConfig(host={self.host}, database={self.database})"
-    
+        return f"MySQLConfig(enable={self.enable}, host={self.host}, database={self.database})"
+
     def get_connection_string(self) -> str:
         """获取数据库连接字符串"""
         return f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}?charset={self.charset}"
+
+
+@dataclass
+class SQLiteConfig:
+    """
+    SQLite配置类
+    """
+    path: str = "data/py_getjobs.db"
+
+    def __str__(self) -> str:
+        """字符串表示"""
+        return f"SQLiteConfig(path={self.path})"
 
 
 @dataclass
@@ -418,20 +431,21 @@ def load_mysql_config(file_path: str = "config/config.yaml") -> MySQLConfig:
     except ImportError:
         log.error("缺少yaml模块，请安装 pyyaml 包以支持YAML配置文件")
         raise
-    
+
     try:
         config_file = Path(file_path)
         if not config_file.exists():
             log.error(f"配置文件不存在: {file_path}")
             # 返回默认MySQL配置
             return MySQLConfig()
-        
+
         with open(config_file, 'r', encoding='utf-8') as f:
             config_dict = yaml.safe_load(f)
-        
+
         mysql_section = config_dict.get("mysql", {})
         log.info(f"成功加载MySQL配置")
         mysql_config = MySQLConfig(
+            enable=mysql_section.get("enable", True),
             host=mysql_section.get("host", "localhost"),
             port=mysql_section.get("port", 3306),
             user=mysql_section.get("user", "root"),
@@ -440,9 +454,44 @@ def load_mysql_config(file_path: str = "config/config.yaml") -> MySQLConfig:
             charset=mysql_section.get("charset", "utf8mb4")
         )
         return mysql_config
-        
+
     except Exception as e:
         log.error(f"加载MySQL配置失败: {e}")
+        raise
+
+
+@functools.lru_cache(maxsize=1)
+def load_sqlite_config(file_path: str = "config/config.yaml") -> SQLiteConfig:
+    """
+    加载SQLite配置（带缓存）
+    :param file_path: 配置文件路径
+    :return: SQLiteConfig对象
+    """
+    try:
+        import yaml
+    except ImportError:
+        log.error("缺少yaml模块，请安装 pyyaml 包以支持YAML配置文件")
+        raise
+
+    try:
+        config_file = Path(file_path)
+        if not config_file.exists():
+            log.error(f"配置文件不存在: {file_path}")
+            # 返回默认SQLite配置
+            return SQLiteConfig()
+
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config_dict = yaml.safe_load(f)
+
+        sqlite_section = config_dict.get("sqlite", {})
+        log.info(f"成功加载SQLite配置")
+        sqlite_config = SQLiteConfig(
+            path=sqlite_section.get("path", "data/py_getjobs.db")
+        )
+        return sqlite_config
+
+    except Exception as e:
+        log.error(f"加载SQLite配置失败: {e}")
         raise
 
 # 使用示例

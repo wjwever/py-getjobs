@@ -1,29 +1,111 @@
-from typing import Collection, List, Dict, Any, Optional
+import os
+import sqlite3
+from typing import List, Dict, Any, Optional
+
 import pymysql
-from pymysql import Error
+from pymysql import Error as MySQLError
+
 from util.logger import logger
-from boss.boss_config import load_mysql_config
+from boss.boss_config import load_mysql_config, load_sqlite_config
+
+
+# ========== SQLite 适配层 ==========
+
+class _SQLiteCursor:
+    """将 sqlite3 cursor 包装成和 pymysql DictCursor 相同的接口"""
+
+    def __init__(self, cursor: sqlite3.Cursor):
+        self._cursor = cursor
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    def execute(self, query: str, args=None):
+        # pymysql 使用 %s 占位符，sqlite3 使用 ?
+        sqlite_query = query.replace('%s', '?')
+        if args is not None:
+            self._cursor.execute(sqlite_query, args)
+        else:
+            self._cursor.execute(sqlite_query)
+
+    def fetchone(self) -> Optional[Dict[str, Any]]:
+        row = self._cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    def fetchall(self) -> List[Dict[str, Any]]:
+        return [dict(row) for row in self._cursor.fetchall()]
+
+    @property
+    def lastrowid(self) -> Optional[int]:
+        return self._cursor.lastrowid
+
+
+class _SQLiteConnection:
+    """将 sqlite3 connection 包装成和 pymysql connection 相同的接口"""
+
+    def __init__(self, conn: sqlite3.Connection):
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        self._conn = conn
+
+    def cursor(self) -> _SQLiteCursor:
+        return _SQLiteCursor(self._conn.cursor())
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+
+# ========== DatabaseManager ==========
 
 class DatabaseManager:
-    """数据库管理器 - 简洁易用的数据库操作类"""
-    
-    # 单例模式实现
+    """数据库管理器 - 支持 MySQL / SQLite 双后端，对外接口统一"""
+
     _instance = None
-    
+
     def __new__(cls):
-        """重写__new__方法实现单例模式"""
         if cls._instance is None:
             cls._instance = super(DatabaseManager, cls).__new__(cls)
             cls._instance.connection = None
+            cls._instance._is_sqlite = False
             cls._instance.connect()
         return cls._instance
 
     def connect(self):
-        """连接数据库，如果不存在则创建数据库和表"""
-        config = load_mysql_config()
+        """根据配置连接 MySQL 或 SQLite"""
+        mysql_config = load_mysql_config()
 
+        if not mysql_config.enable:
+            self._connect_sqlite()
+        else:
+            self._connect_mysql(mysql_config)
+
+    def _connect_sqlite(self):
+        """连接 SQLite 数据库"""
+        sqlite_config = load_sqlite_config()
+        db_path = sqlite_config.path
+        # 确保目录存在
+        db_dir = os.path.dirname(db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         try:
-            # 先尝试连接到MySQL服务器（不指定数据库）
+            raw_conn = sqlite3.connect(db_path, check_same_thread=False)
+            self.connection = _SQLiteConnection(raw_conn)
+            self._is_sqlite = True
+            logger.info(f"SQLite 数据库连接成功: {db_path}")
+        except sqlite3.Error as e:
+            logger.error(f"SQLite 连接失败: {e}")
+            raise
+
+    def _connect_mysql(self, config):
+        """连接 MySQL 数据库"""
+        try:
+            # 先连接服务器，检查并创建数据库
             temp_conn = pymysql.connect(
                 host=config.host,
                 user=config.user,
@@ -31,20 +113,19 @@ class DatabaseManager:
                 charset='utf8mb4',
                 cursorclass=pymysql.cursors.DictCursor
             )
-
             cursor = temp_conn.cursor()
-
-            # 1. 检查并创建数据库
-            cursor.execute("SHOW DATABASES LIKE 'py_getjobs'")
+            cursor.execute(f"SHOW DATABASES LIKE '{config.database}'")
             if not cursor.fetchone():
-                logger.info("数据库 'py_getjobs' 不存在，正在创建...")
-                cursor.execute("CREATE DATABASE py_getjobs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-                logger.info("数据库 'py_getjobs' 创建成功！")
-
+                logger.info(f"数据库 '{config.database}' 不存在，正在创建...")
+                cursor.execute(
+                    f"CREATE DATABASE `{config.database}` "
+                    f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                )
+                logger.info(f"数据库 '{config.database}' 创建成功！")
             cursor.close()
             temp_conn.close()
 
-            # 2. 连接到具体数据库
+            # 连接到具体数据库
             self.connection = pymysql.connect(
                 host=config.host,
                 user=config.user,
@@ -53,72 +134,109 @@ class DatabaseManager:
                 charset='utf8mb4',
                 cursorclass=pymysql.cursors.DictCursor
             )
-
-            # 3. 检查并创建表
-            # self._create_tables_if_not_exist()
-
-            logger.info("数据库连接成功！")
-
-        except Error as e:
-            logger.error(f"连接失败: {e}")
+            self._is_sqlite = False
+            logger.info("MySQL 数据库连接成功！")
+        except MySQLError as e:
+            logger.error(f"MySQL 连接失败: {e}")
             raise
-    
+
+    # ========== 建表 ==========
+
     def create_tables(self):
         """创建数据表"""
         self.create_jobs_table()
         self.create_posts_table()
-    
+
     def create_jobs_table(self):
         """创建职位信息表"""
         try:
             with self.connection.cursor() as cursor:
-                create_table_query = """
-                CREATE TABLE IF NOT EXISTS jobs (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    job_name VARCHAR(255),
-                    job_desc TEXT,
-                    skills TEXT,
-                    key_word VARCHAR(255),
-                    job_salary VARCHAR(100),
-                    tag_list TEXT,
-                    boss_name VARCHAR(255),
-                    boss_company VARCHAR(255),
-                    company_location VARCHAR(255),
-                    boss_title VARCHAR(255),
-                    boss_active VARCHAR(100),
-                    job_detail_url VARCHAR(500) UNIQUE,
-                    referer VARCHAR(500),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                )
-                """
-                cursor.execute(create_table_query)
+                if self._is_sqlite:
+                    ddl = """
+                    CREATE TABLE IF NOT EXISTS jobs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        job_name VARCHAR(255),
+                        job_desc TEXT,
+                        skills TEXT,
+                        key_word VARCHAR(255),
+                        job_salary VARCHAR(100),
+                        tag_list TEXT,
+                        boss_name VARCHAR(255),
+                        boss_company VARCHAR(255),
+                        company_location VARCHAR(255),
+                        boss_title VARCHAR(255),
+                        boss_active VARCHAR(100),
+                        job_detail_url VARCHAR(500) UNIQUE,
+                        referer VARCHAR(500),
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                else:
+                    ddl = """
+                    CREATE TABLE IF NOT EXISTS jobs (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        job_name VARCHAR(255),
+                        job_desc TEXT,
+                        skills TEXT,
+                        key_word VARCHAR(255),
+                        job_salary VARCHAR(100),
+                        tag_list TEXT,
+                        boss_name VARCHAR(255),
+                        boss_company VARCHAR(255),
+                        company_location VARCHAR(255),
+                        boss_title VARCHAR(255),
+                        boss_active VARCHAR(100),
+                        job_detail_url VARCHAR(500) UNIQUE,
+                        referer VARCHAR(500),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    )
+                    """
+                cursor.execute(ddl)
+                if not self._is_sqlite:
+                    self.connection.commit()
                 logger.info("职位信息表创建成功！")
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"创建职位表失败: {e}")
-    
+
     def create_posts_table(self):
         """创建投递记录表"""
         try:
             with self.connection.cursor() as cursor:
-                create_table_query = """
-                CREATE TABLE IF NOT EXISTS posts (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    job_id INT,
-                    status VARCHAR(50),
-                    ai_result TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
-                )
-                """
-                cursor.execute(create_table_query)
+                if self._is_sqlite:
+                    ddl = """
+                    CREATE TABLE IF NOT EXISTS posts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        job_id INT,
+                        status VARCHAR(50),
+                        ai_result TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+                    )
+                    """
+                else:
+                    ddl = """
+                    CREATE TABLE IF NOT EXISTS posts (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        job_id INT,
+                        status VARCHAR(50),
+                        ai_result TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+                    )
+                    """
+                cursor.execute(ddl)
+                if not self._is_sqlite:
+                    self.connection.commit()
                 logger.info("投递记录表创建成功！")
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"创建投递记录表失败: {e}")
 
     # ========== 职位表操作 ==========
-    
+
     def add_job(self, job_data: Dict[str, Any]) -> Optional[int]:
         """添加职位信息"""
         try:
@@ -126,69 +244,67 @@ class DatabaseManager:
                 insert_query = """
                 INSERT INTO jobs (
                     job_name, job_desc, skills, key_word, job_salary, tag_list,
-                    boss_name, boss_company, company_location, boss_title, 
+                    boss_name, boss_company, company_location, boss_title,
                     boss_active, job_detail_url, referer
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
-                
                 values = (
-                    job_data.get('job_name', ''),           #card
+                    job_data.get('job_name', ''),
                     job_data.get('job_desc', ''),
                     job_data.get('skills', ''),
-                    job_data.get('key_word', ''),           #card
-                    job_data.get('job_salary', ''),         #card
-                    job_data.get('tag_list', ''),           #card
+                    job_data.get('key_word', ''),
+                    job_data.get('job_salary', ''),
+                    job_data.get('tag_list', ''),
                     job_data.get('boss_name', ''),
-                    job_data.get('boss_company', ''),       #card
-                    job_data.get('company_location', ''),   #card
+                    job_data.get('boss_company', ''),
+                    job_data.get('company_location', ''),
                     job_data.get('boss_title', ''),
                     job_data.get('boss_active', ''),
-                    job_data.get('job_detail_url', ''),     #card
-                    job_data.get('referer', '')             #card
+                    job_data.get('job_detail_url', ''),
+                    job_data.get('referer', '')
                 )
-                
                 cursor.execute(insert_query, values)
                 self.connection.commit()
                 job_id = cursor.lastrowid
                 logger.info(f"职位 '{job_data.get('job_name', '')}' 添加成功！ID: {job_id}")
                 return job_id
-        except Error as e:
-            if "Duplicate entry" in str(e):
+        except (MySQLError, sqlite3.Error) as e:
+            if "Duplicate entry" in str(e) or "UNIQUE constraint failed" in str(e):
                 logger.warning(f"职位已存在: {job_data.get('job_detail_url', '')}")
             else:
-                logger.error(f"❌ 添加职位失败: {e}")
+                logger.error(f"添加职位失败: {e}")
             return None
-    
+
     def get_job_by_id(self, job_id: int) -> Optional[Dict[str, Any]]:
         """根据ID获取职位信息"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT * FROM jobs WHERE id = %s", (job_id,))
                 return cursor.fetchone()
-        except Error as e:
-            logger.error(f"❌ 获取职位失败: {e}")
+        except (MySQLError, sqlite3.Error) as e:
+            logger.error(f"获取职位失败: {e}")
             return None
-    
+
     def get_job_by_url(self, job_detail_url: str) -> Optional[Dict[str, Any]]:
         """根据URL获取职位信息"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT * FROM jobs WHERE job_detail_url = %s", (job_detail_url,))
                 return cursor.fetchone()
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"获取职位失败: {e}")
             return None
-    
+
     def get_all_jobs(self) -> List[Dict[str, Any]]:
         """获取所有职位信息"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT * FROM jobs ORDER BY created_at DESC")
                 return cursor.fetchall()
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"获取职位列表失败: {e}")
             return []
-    
+
     def search_jobs(self, keyword: str, field: str = "job_name") -> List[Dict[str, Any]]:
         """搜索职位信息"""
         try:
@@ -196,115 +312,97 @@ class DatabaseManager:
                 query = f"SELECT * FROM jobs WHERE {field} LIKE %s ORDER BY created_at DESC"
                 cursor.execute(query, (f"%{keyword}%",))
                 return cursor.fetchall()
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"搜索职位失败: {e}")
             return []
-    
+
     def search_jobs_by_field_value(self, field: str, value: str) -> List[Dict[str, Any]]:
-        """精准搜索职位信息 - 根据指定字段和值进行精确匹配
-        
-        Args:
-            field: 要搜索的字段名
-            value: 要搜索的值
-            
-        Returns:
-            匹配的职位列表
-        """
+        """精准搜索职位信息 - 根据指定字段和值进行精确匹配"""
         try:
-            # 验证字段名是否有效，防止SQL注入
             valid_fields = [
-                'job_name', 'job_desc', 'skills', 'key_word', 'job_salary', 
-                'tag_list', 'boss_name', 'boss_company', 'company_location', 
+                'job_name', 'job_desc', 'skills', 'key_word', 'job_salary',
+                'tag_list', 'boss_name', 'boss_company', 'company_location',
                 'boss_title', 'boss_active', 'job_detail_url', 'referer'
             ]
-            
             if field not in valid_fields:
                 logger.error(f"无效的字段名: {field}")
                 return []
-            
+
             with self.connection.cursor() as cursor:
                 if value == "":
-                    # 搜索空值
                     query = f"SELECT * FROM jobs WHERE {field} IS NULL OR {field} = '' ORDER BY created_at DESC"
                     cursor.execute(query)
                 else:
-                    # 精确匹配非空值
                     query = f"SELECT * FROM jobs WHERE {field} = %s ORDER BY created_at DESC"
                     cursor.execute(query, (value,))
-                
                 results = cursor.fetchall()
                 logger.info(f"在字段 '{field}' 中搜索值 '{value}'，找到 {len(results)} 个匹配职位")
                 return results
-                
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"精准搜索职位失败: {e}")
             return []
 
     def update_job(self, job_id: int, update_data: Dict[str, Any]) -> bool:
         """更新职位信息"""
         try:
-            with self.connection.cursor() as cursor:
-                update_fields = []
-                values = []
-                
-                valid_fields = [
-                    'job_name', 'job_desc', 'skills', 'key_word', 'job_salary', 
-                    'tag_list', 'boss_name', 'boss_company', 'company_location', 
-                    'boss_title', 'boss_active', 'referer'
-                ]
-                
-                for field in valid_fields:
-                    if field in update_data:
-                        update_fields.append(f"{field} = %s")
-                        values.append(update_data[field])
-                
-                if update_fields:
-                    values.append(job_id)
-                    update_query = f"UPDATE jobs SET {', '.join(update_fields)} WHERE id = %s"
-                    cursor.execute(update_query, values)
-                    self.connection.commit()
-                    logger.info(f"职位ID {job_id} 更新成功！")
-                    return True
+            valid_fields = [
+                'job_name', 'job_desc', 'skills', 'key_word', 'job_salary',
+                'tag_list', 'boss_name', 'boss_company', 'company_location',
+                'boss_title', 'boss_active', 'referer'
+            ]
+            update_fields = []
+            values = []
+            for field in valid_fields:
+                if field in update_data:
+                    update_fields.append(f"{field} = %s")
+                    values.append(update_data[field])
+
+            if not update_fields:
                 return False
-        except Error as e:
+
+            values.append(job_id)
+            with self.connection.cursor() as cursor:
+                update_query = f"UPDATE jobs SET {', '.join(update_fields)} WHERE id = %s"
+                cursor.execute(update_query, values)
+                self.connection.commit()
+            logger.info(f"职位ID {job_id} 更新成功！")
+            return True
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"更新职位失败: {e}")
             return False
-    
+
     def delete_job(self, job_id: int) -> bool:
         """删除职位信息"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
                 self.connection.commit()
-                logger.info(f"职位ID {job_id} 删除成功！")
-                return True
-        except Error as e:
+            logger.info(f"职位ID {job_id} 删除成功！")
+            return True
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"删除职位失败: {e}")
             return False
 
     # ========== 投递记录表操作 ==========
-    
+
     def add_post_record(self, job_id: int, status: str, ai_result: str = "") -> Optional[int]:
-        """添加投递记录，如果job_id已存在则更新记录"""
+        """添加投递记录，如果 job_id 已存在则更新记录"""
         try:
             with self.connection.cursor() as cursor:
-                # 先检查是否已存在该job_id的记录
                 cursor.execute("SELECT id FROM posts WHERE job_id = %s", (job_id,))
                 existing_record = cursor.fetchone()
-                
+
                 if existing_record:
-                    # 如果记录已存在，则更新
                     update_query = """
-                    UPDATE posts 
-                    SET status = %s, ai_result = %s, updated_at = CURRENT_TIMESTAMP 
+                    UPDATE posts
+                    SET status = %s, ai_result = %s, updated_at = CURRENT_TIMESTAMP
                     WHERE job_id = %s
                     """
                     cursor.execute(update_query, (status, ai_result, job_id))
                     self.connection.commit()
-                    post_id = existing_record['id']  # 使用已存在的记录ID
+                    post_id = existing_record['id']
                     logger.info(f"投递记录已更新！职位ID: {job_id}, 状态: {status}")
                 else:
-                    # 如果记录不存在，则插入新记录
                     insert_query = """
                     INSERT INTO posts (job_id, status, ai_result) VALUES (%s, %s, %s)
                     """
@@ -312,59 +410,65 @@ class DatabaseManager:
                     self.connection.commit()
                     post_id = cursor.lastrowid
                     logger.info(f"投递记录添加成功！职位ID: {job_id}, 状态: {status}")
-                
+
                 return post_id
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"处理投递记录失败: {e}")
             return None
-    
+
     def get_post_by_id(self, post_id: int) -> Optional[Dict[str, Any]]:
         """根据ID获取投递记录"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT * FROM posts WHERE id = %s", (post_id,))
                 return cursor.fetchone()
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"获取投递记录失败: {e}")
             return None
-    
+
     def get_posts_by_job_id(self, job_id: int) -> List[Dict[str, Any]]:
         """根据职位ID获取投递记录"""
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute("SELECT * FROM posts WHERE job_id = %s ORDER BY created_at DESC", (job_id,))
+                cursor.execute(
+                    "SELECT * FROM posts WHERE job_id = %s ORDER BY created_at DESC",
+                    (job_id,)
+                )
                 return cursor.fetchall()
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"获取投递记录失败: {e}")
             return []
-    
+
     def get_all_posts(self) -> List[Dict[str, Any]]:
         """获取所有投递记录"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("""
-                    SELECT p.*, j.job_name, j.boss_company 
-                    FROM posts p 
-                    LEFT JOIN jobs j ON p.job_id = j.id 
+                    SELECT p.*, j.job_name, j.boss_company
+                    FROM posts p
+                    LEFT JOIN jobs j ON p.job_id = j.id
                     ORDER BY p.created_at DESC
                 """)
                 return cursor.fetchall()
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"获取投递记录失败: {e}")
             return []
-    
+
     def update_post_status(self, post_id: int, status: str) -> bool:
         """更新投递状态"""
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute("UPDATE posts SET status = %s WHERE id = %s", (status, post_id))
+                cursor.execute(
+                    "UPDATE posts SET status = %s WHERE id = %s",
+                    (status, post_id)
+                )
                 self.connection.commit()
-                logger.info(f"投递记录ID {post_id} 状态更新为: {status}")
-                return True
-        except Error as e:
+            logger.info(f"投递记录ID {post_id} 状态更新为: {status}")
+            return True
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"更新投递状态失败: {e}")
             return False
-    
+
     def get_jobs_by_post_status(self, status: str) -> List[Dict[str, Any]]:
         """根据投递状态查找所有职位信息"""
         try:
@@ -377,142 +481,82 @@ class DatabaseManager:
                     ORDER BY p.updated_at DESC
                 """, (status,))
                 return cursor.fetchall()
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"根据投递状态查找职位失败: {e}")
             return []
 
     def get_active_jobs(self) -> List[Dict[str, Any]]:
-        """获取活跃职位 - 在posts表中没有记录的职位"""
+        """获取活跃职位 - 在 posts 表中没有记录的职位"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("""
-                    SELECT j.* 
-                    FROM jobs j 
-                    LEFT JOIN posts p ON j.id = p.job_id 
-                    WHERE p.job_id IS NULL or p.status = '' 
+                    SELECT j.*
+                    FROM jobs j
+                    LEFT JOIN posts p ON j.id = p.job_id
+                    WHERE p.job_id IS NULL or p.status = ''
                     ORDER BY j.created_at DESC
                 """)
                 active_jobs = cursor.fetchall()
                 logger.info(f"找到 {len(active_jobs)} 个活跃职位")
                 return active_jobs
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"获取活跃职位失败: {e}")
             return []
 
     def get_error_status_jobs(self) -> List[Dict[str, Any]]:
-        """获取活跃职位 - 在posts表中没有记录的职位"""
+        """获取 closed 状态的职位"""
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("""
-                    SELECT j.* 
-                    FROM jobs j 
-                    LEFT JOIN posts p ON j.id = p.job_id 
-                    WHERE p.status = "closed"
+                    SELECT j.*
+                    FROM jobs j
+                    LEFT JOIN posts p ON j.id = p.job_id
+                    WHERE p.status = 'closed'
                     ORDER BY j.created_at DESC
                 """)
                 jobs = cursor.fetchall()
-                logger.info(f"找到 {len(jobs)} 个活跃职位")
+                logger.info(f"找到 {len(jobs)} 个 closed 状态职位")
                 return jobs
-        except Error as e:
-            logger.error(f"获取活跃职位失败: {e}")
+        except (MySQLError, sqlite3.Error) as e:
+            logger.error(f"获取 closed 状态职位失败: {e}")
             return []
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
         try:
             with self.connection.cursor() as cursor:
-                # 职位统计
                 cursor.execute("SELECT COUNT(*) as count FROM jobs")
                 total_jobs = cursor.fetchone()['count']
-                
-                # 投递统计
+
                 cursor.execute("SELECT COUNT(*) as count FROM posts")
                 total_posts = cursor.fetchone()['count']
-                
-                # 状态统计
+
                 cursor.execute("SELECT status, COUNT(*) as count FROM posts GROUP BY status")
                 status_stats = {row['status']: row['count'] for row in cursor.fetchall()}
-                
+
                 return {
                     'total_jobs': total_jobs,
                     'total_posts': total_posts,
                     'status_stats': status_stats
                 }
-        except Error as e:
+        except (MySQLError, sqlite3.Error) as e:
             logger.error(f"获取统计信息失败: {e}")
             return {'total_jobs': 0, 'total_posts': 0, 'status_stats': {}}
-    
+
     def close(self):
         """关闭数据库连接"""
         if self.connection:
             self.connection.close()
             logger.info("数据库连接已关闭")
 
+
 # 使用示例
 if __name__ == "__main__":
-    # 创建数据库管理器（单例模式）
     db = DatabaseManager()
-    
-    # 测试单例模式
     db2 = DatabaseManager()
     logger.info(f"db和db2是同一个实例吗？ {db is db2}")
-    
-    # 创建数据表
+
     db.create_tables()
     db.add_post_record(203, "post_error")
-    
-    # # 示例1: 添加职位信息
-    # logger.info("\n=== 添加职位信息 ===")
-    # job_data = {
-    #     "job_name": "Python开发工程师",
-    #     "job_desc": "负责Python后端开发，使用Django/Flask框架",
-    #     "skills": "Python, Django, Flask, MySQL",
-    #     "key_word": "Python",
-    #     "job_salary": "15-25K",
-    #     "tag_list": "Python,后端开发",
-    #     "boss_name": "张经理",
-    #     "boss_company": "阿里巴巴",
-    #     "company_location": "杭州",
-    #     "boss_title": "招聘经理",
-    #     "boss_active": "3天内活跃",
-    #     "job_detail_url": "https://www.zhipin.com/job1",
-    #     "referer": "https://www.zhipin.com"
-    # }
-    #
-    # job_id = db.add_job(job_data)
-    #
-    # # 示例2: 添加投递记录
-    # if job_id:
-    #     logger.info("\n=== 添加投递记录 ===")
-    #     post_id = db.add_post_record(job_id, "已投递", "AI分析通过")
-    #
-    # # 示例3: 查询职位信息
-    # logger.info("\n=== 查询职位信息 ===")
-    # job = db.get_job_by_id(job_id)
-    # if job:
-    #     logger.info(f"职位名称: {job['job_name']}")
-    #     logger.info(f"公司: {job['boss_company']}")
-    #     logger.info(f"薪资: {job['job_salary']}")
-    #
-    # # 示例4: 查询投递记录
-    # logger.info("\n=== 查询投递记录 ===")
-    # posts = db.get_posts_by_job_id(job_id)
-    # for post in posts:
-    #     logger.info(f"投递状态: {post['status']}, AI结果: {post['ai_result']}")
-    #     logger.info(f"创建时间: {post['created_at']}, 更新时间: {post['updated_at']}")
-    #
-    # # 示例5: 根据投递状态查找职位
-    # logger.info("\n=== 根据投递状态查找职位 ===")
-    # jobs_with_status = db.get_jobs_by_post_status("已投递")
-    # for job in jobs_with_status:
-    #     logger.info(f"职位: {job['job_name']}, 公司: {job['boss_company']}, 投递状态: {job['status']}")
-    #
-    # # 示例6: 获取统计信息
-    # logger.info("\n=== 统计信息 ===")
-    # stats = db.get_statistics()
-    # logger.info(f"总职位数: {stats['total_jobs']}")
-    # logger.info(f"总投递数: {stats['total_posts']}")
-    # logger.info(f"状态统计: {stats['status_stats']}")
-    
-    # 关闭连接
+
     db.close()
