@@ -88,6 +88,9 @@ class BossConfig:
     
     # 工作类型
     job_type: str = ""
+
+    # 工作类型原始名称（转换前的中文值，如"全职"、"兼职"）
+    job_type_name: str = ""
     
     # 薪资范围
     salary: str = ""
@@ -217,6 +220,7 @@ class BossConfig:
     
     def _convert_job_type(self):
         """转换工作类型"""
+        self.job_type_name = self.job_type if self.job_type else "不限"
         if self.job_type:
             try:
                 job_type_enum = BossEnum.JobType.for_value(self.job_type)

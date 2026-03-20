@@ -249,6 +249,7 @@ class Boss:
             db = DatabaseManager()
             for _, v in results.items():
                 v["key_word"] = keyword
+                v["job_type"] = cls.config.job_type_name
                 db.add_job(v)
 
     @classmethod

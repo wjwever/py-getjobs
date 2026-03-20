@@ -142,6 +142,89 @@ class DatabaseManager:
 
     # ========== 建表 ==========
 
+    def _add_column_if_not_exists(self, cursor, table: str, column: str, col_def: str):
+        """如果指定列不存在，则为表添加该列"""
+        try:
+            if self._is_sqlite:
+                cursor.execute(f"PRAGMA table_info({table})")
+                columns = [row['name'] for row in cursor.fetchall()]
+            else:
+                cursor.execute(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_NAME = %s AND COLUMN_NAME = %s",
+                    (table, column)
+                )
+                columns = [row['COLUMN_NAME'] for row in cursor.fetchall()]
+
+            if column not in columns:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
+                logger.info(f"已为表 {table} 添加列 {column}")
+        except (MySQLError, sqlite3.Error) as e:
+            logger.warning(f"检查/添加列 {column} 失败: {e}")
+
+    def _migrate_jobs_column_order(self, cursor):
+        """迁移 jobs 表列顺序，使 job_type, boss_company, boss_active 排在 id 之后"""
+        expected_order = [
+            'id', 'job_type', 'boss_company', 'boss_active',
+            'job_name', 'job_desc', 'skills', 'key_word', 'job_salary',
+            'tag_list', 'boss_name', 'company_location', 'boss_title',
+            'job_detail_url', 'referer', 'created_at', 'updated_at'
+        ]
+        try:
+            if self._is_sqlite:
+                cursor.execute("PRAGMA table_info(jobs)")
+                current_order = [row['name'] for row in cursor.fetchall()]
+                if current_order == expected_order:
+                    return
+                # 只有当表存在且列顺序不一致时才迁移
+                if not current_order:
+                    return
+                logger.info("检测到 jobs 表列顺序需要调整，开始迁移...")
+                cols = ', '.join(expected_order)
+                cursor.execute(f"CREATE TABLE jobs_new AS SELECT {cols} FROM jobs")
+                cursor.execute("DROP TABLE jobs")
+                cursor.execute(f"""
+                    CREATE TABLE jobs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        job_type VARCHAR(50) DEFAULT '不限',
+                        boss_company VARCHAR(255),
+                        boss_active VARCHAR(100),
+                        job_name VARCHAR(255),
+                        job_desc TEXT,
+                        skills TEXT,
+                        key_word VARCHAR(255),
+                        job_salary VARCHAR(100),
+                        tag_list TEXT,
+                        boss_name VARCHAR(255),
+                        company_location VARCHAR(255),
+                        boss_title VARCHAR(255),
+                        job_detail_url VARCHAR(500) UNIQUE,
+                        referer VARCHAR(500),
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute(f"INSERT INTO jobs ({cols}) SELECT {cols} FROM jobs_new")
+                cursor.execute("DROP TABLE jobs_new")
+                logger.info("jobs 表列顺序迁移完成")
+            else:
+                cursor.execute(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_NAME = 'jobs' ORDER BY ORDINAL_POSITION"
+                )
+                current_order = [row['COLUMN_NAME'] for row in cursor.fetchall()]
+                if current_order == expected_order:
+                    return
+                if not current_order:
+                    return
+                logger.info("检测到 jobs 表列顺序需要调整，开始迁移...")
+                cursor.execute("ALTER TABLE jobs MODIFY COLUMN job_type VARCHAR(50) DEFAULT '不限' AFTER id")
+                cursor.execute("ALTER TABLE jobs MODIFY COLUMN boss_company VARCHAR(255) AFTER job_type")
+                cursor.execute("ALTER TABLE jobs MODIFY COLUMN boss_active VARCHAR(100) AFTER boss_company")
+                logger.info("jobs 表列顺序迁移完成")
+        except (MySQLError, sqlite3.Error) as e:
+            logger.warning(f"迁移 jobs 表列顺序失败: {e}")
+
     def create_tables(self):
         """创建数据表"""
         self.create_jobs_table()
@@ -155,6 +238,9 @@ class DatabaseManager:
                     ddl = """
                     CREATE TABLE IF NOT EXISTS jobs (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        job_type VARCHAR(50) DEFAULT '不限',
+                        boss_company VARCHAR(255),
+                        boss_active VARCHAR(100),
                         job_name VARCHAR(255),
                         job_desc TEXT,
                         skills TEXT,
@@ -162,10 +248,8 @@ class DatabaseManager:
                         job_salary VARCHAR(100),
                         tag_list TEXT,
                         boss_name VARCHAR(255),
-                        boss_company VARCHAR(255),
                         company_location VARCHAR(255),
                         boss_title VARCHAR(255),
-                        boss_active VARCHAR(100),
                         job_detail_url VARCHAR(500) UNIQUE,
                         referer VARCHAR(500),
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -176,6 +260,9 @@ class DatabaseManager:
                     ddl = """
                     CREATE TABLE IF NOT EXISTS jobs (
                         id INT AUTO_INCREMENT PRIMARY KEY,
+                        job_type VARCHAR(50) DEFAULT '不限',
+                        boss_company VARCHAR(255),
+                        boss_active VARCHAR(100),
                         job_name VARCHAR(255),
                         job_desc TEXT,
                         skills TEXT,
@@ -183,10 +270,8 @@ class DatabaseManager:
                         job_salary VARCHAR(100),
                         tag_list TEXT,
                         boss_name VARCHAR(255),
-                        boss_company VARCHAR(255),
                         company_location VARCHAR(255),
                         boss_title VARCHAR(255),
-                        boss_active VARCHAR(100),
                         job_detail_url VARCHAR(500) UNIQUE,
                         referer VARCHAR(500),
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -194,6 +279,9 @@ class DatabaseManager:
                     )
                     """
                 cursor.execute(ddl)
+                # 兼容旧表：如果 job_type 列不存在则自动添加，然后迁移列顺序
+                self._add_column_if_not_exists(cursor, 'jobs', 'job_type', "VARCHAR(50) DEFAULT '不限'")
+                self._migrate_jobs_column_order(cursor)
                 if not self._is_sqlite:
                     self.connection.commit()
                 logger.info("职位信息表创建成功！")
@@ -243,12 +331,16 @@ class DatabaseManager:
             with self.connection.cursor() as cursor:
                 insert_query = """
                 INSERT INTO jobs (
+                    job_type, boss_company, boss_active,
                     job_name, job_desc, skills, key_word, job_salary, tag_list,
-                    boss_name, boss_company, company_location, boss_title,
-                    boss_active, job_detail_url, referer
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    boss_name, company_location, boss_title,
+                    job_detail_url, referer
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 values = (
+                    job_data.get('job_type', '不限'),
+                    job_data.get('boss_company', ''),
+                    job_data.get('boss_active', ''),
                     job_data.get('job_name', ''),
                     job_data.get('job_desc', ''),
                     job_data.get('skills', ''),
@@ -256,10 +348,8 @@ class DatabaseManager:
                     job_data.get('job_salary', ''),
                     job_data.get('tag_list', ''),
                     job_data.get('boss_name', ''),
-                    job_data.get('boss_company', ''),
                     job_data.get('company_location', ''),
                     job_data.get('boss_title', ''),
-                    job_data.get('boss_active', ''),
                     job_data.get('job_detail_url', ''),
                     job_data.get('referer', '')
                 )
@@ -320,7 +410,7 @@ class DatabaseManager:
         """精准搜索职位信息 - 根据指定字段和值进行精确匹配"""
         try:
             valid_fields = [
-                'job_name', 'job_desc', 'skills', 'key_word', 'job_salary',
+                'job_name', 'job_desc', 'skills', 'key_word', 'job_type', 'job_salary',
                 'tag_list', 'boss_name', 'boss_company', 'company_location',
                 'boss_title', 'boss_active', 'job_detail_url', 'referer'
             ]
@@ -346,7 +436,7 @@ class DatabaseManager:
         """更新职位信息"""
         try:
             valid_fields = [
-                'job_name', 'job_desc', 'skills', 'key_word', 'job_salary',
+                'job_name', 'job_desc', 'skills', 'key_word', 'job_type', 'job_salary',
                 'tag_list', 'boss_name', 'boss_company', 'company_location',
                 'boss_title', 'boss_active', 'referer'
             ]
