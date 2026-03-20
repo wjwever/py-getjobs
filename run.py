@@ -31,4 +31,5 @@ if __name__ == "__main__":
 
     fill_job_infos()
 
+    # 投递那就打开下面这行
     #Boss.post_active_jobs()
